@@ -8,27 +8,25 @@ from config import (
     ESTADOS_PAUSA, ESTADOS_FORA,
 )
 
+# ─── CONSTANTES ───────────────────────────────────────────────────────────────
 
-# ─── HELPER XLSX ──────────────────────────────────────────────────────────────
+_TICK_VALS = list(range(0, 1441, 60))
+_TICK_TEXT = [f"{v // 60:02d}:00" for v in _TICK_VALS]
 
-def _to_xlsx(df: pd.DataFrame) -> bytes:
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        df.to_excel(w, index=False)
-    return buf.getvalue()
-
-
-# ─── LAYOUT PADRÃO ────────────────────────────────────────────────────────────
-
-_LAYOUT_BASE = dict(
+_LAYOUT = dict(
     template="plotly_white",
     plot_bgcolor="#ffffff",
     paper_bgcolor="#ffffff",
     font=dict(color="#111111", size=12),
 )
 
-_TICK_VALS = list(range(0, 1441, 60))
-_TICK_TEXT = [f"{v // 60:02d}:00" for v in _TICK_VALS]
+# ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+def _to_xlsx(df: pd.DataFrame) -> bytes:
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        df.to_excel(w, index=False)
+    return buf.getvalue()
 
 
 # ─── GANTT ────────────────────────────────────────────────────────────────────
@@ -45,13 +43,11 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
             fim = row["fim"]
             if pd.isna(ini) or pd.isna(fim):
                 continue
-
-            meia   = ini.replace(hour=0, minute=0, second=0, microsecond=0)
-            base   = (ini - meia).total_seconds() / 60
-            dur    = (fim - ini).total_seconds() / 60
+            meia = ini.replace(hour=0, minute=0, second=0, microsecond=0)
+            base = (ini - meia).total_seconds() / 60
+            dur  = (fim - ini).total_seconds() / 60
             if dur <= 0:
                 continue
-
             estado = row["estado"]
             cor    = PALETA_STATUS.get(estado, "#aaaaaa")
             show   = estado not in estados_vis
@@ -71,16 +67,15 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
                     f"Status: {estado}<br>"
                     f"Início: {ini.strftime('%H:%M')}<br>"
                     f"Fim: {fim.strftime('%H:%M')}<br>"
-                    f"Duração: {dur:.1f} min"
-                    "<extra></extra>"
+                    f"Duração: {dur:.1f} min<extra></extra>"
                 ),
             ))
 
     fig.update_layout(
-        **_LAYOUT_BASE,
+        **_LAYOUT,
         barmode="overlay",
         height=max(400, len(agentes) * 48 + 140),
-        title=dict(text="Timeline de Status por Agente", font=dict(color="#111111")),
+        title=dict(text="Timeline de Status por Agente"),
         xaxis=dict(
             title="Hora do dia",
             tickvals=_TICK_VALS,
@@ -104,7 +99,7 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
             bordercolor="#cccccc",
             borderwidth=1,
         ),
-        margin=dict(l=200, r=20, t=60, b=60),
+        margin=dict(l=220, r=20, t=60, b=60),
     )
     return fig
 
@@ -113,14 +108,18 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
 
 def _kpis(df: pd.DataFrame) -> dict:
     """
-    Calcula KPIs apenas sobre agentes que tiveram ao menos
-    um registro produtivo no período filtrado.
+    Calcula apenas sobre agentes que tiveram ao menos
+    um registro Online no período filtrado.
     """
     agentes_online = df[
         df["estado"].isin(ESTADOS_PRODUTIVOS)
     ]["agente"].unique()
 
-    df_base = df[df["agente"].isin(agentes_online)] if len(agentes_online) > 0 else df
+    df_base = (
+        df[df["agente"].isin(agentes_online)].copy()
+        if len(agentes_online) > 0
+        else df.copy()
+    )
 
     prod  = df_base[df_base["estado"].isin(ESTADOS_PRODUTIVOS)]["minutos"].sum()
     pausa = df_base[df_base["estado"].isin(ESTADOS_PAUSA)]["minutos"].sum()
@@ -135,7 +134,7 @@ def _kpis(df: pd.DataFrame) -> dict:
         "pct_prod":  prod  / total * 100,
         "pct_pausa": pausa / total * 100,
         "pct_fora":  fora  / total * 100,
-        "n_agentes": len(agentes_online),
+        "n_agentes": int(len(agentes_online)),
     }
 
 
@@ -151,9 +150,9 @@ def _ranking(df: pd.DataFrame):
         total = prod + pausa + fora
         rows.append({
             "Agente":          ag,
-            "Produtivo (min)": round(prod, 1),
+            "Produtivo (min)": round(prod,  1),
             "Pausa (min)":     round(pausa, 1),
-            "Fora (min)":      round(fora, 1),
+            "Fora (min)":      round(fora,  1),
             "Total (min)":     round(total, 1),
             "% Produtivo":     round(prod / total * 100, 1) if total > 0 else 0.0,
         })
@@ -161,7 +160,9 @@ def _ranking(df: pd.DataFrame):
     df_r = pd.DataFrame(rows).sort_values("% Produtivo", ascending=False)
 
     fig = px.bar(
-        df_r, x="Agente", y="% Produtivo",
+        df_r,
+        x="Agente",
+        y="% Produtivo",
         color="% Produtivo",
         color_continuous_scale="RdYlGn",
         range_color=[0, 100],
@@ -171,7 +172,7 @@ def _ranking(df: pd.DataFrame):
     )
     fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
     fig.update_layout(
-        **_LAYOUT_BASE,
+        **_LAYOUT,
         coloraxis_showscale=False,
         yaxis_range=[0, 115],
         xaxis_tickangle=-30,
@@ -182,8 +183,8 @@ def _ranking(df: pd.DataFrame):
 # ─── ALERTAS ──────────────────────────────────────────────────────────────────
 
 def _alertas(df: pd.DataFrame, limite: int) -> pd.DataFrame:
-    rows = []
     estados_alerta = ESTADOS_PAUSA + ESTADOS_FORA
+    rows = []
     for _, r in df[df["estado"].isin(estados_alerta)].iterrows():
         mins = r.get("minutos", 0) or 0
         if mins >= limite:
@@ -194,7 +195,10 @@ def _alertas(df: pd.DataFrame, limite: int) -> pd.DataFrame:
                 "Fim":           r["fim"].strftime("%H:%M"),
                 "Duração (min)": round(mins, 1),
             })
-    return pd.DataFrame(rows).sort_values("Duração (min)", ascending=False)
+    return (
+        pd.DataFrame(rows).sort_values("Duração (min)", ascending=False)
+        if rows else pd.DataFrame()
+    )
 
 
 # ─── HISTÓRICO ────────────────────────────────────────────────────────────────
@@ -210,8 +214,8 @@ def _historico_linha(df_hist: pd.DataFrame):
             prod  = d[d["estado"].isin(ESTADOS_PRODUTIVOS)]["minutos"].sum()
             total = d["minutos"].sum()
             rows.append({
-                "Agente": ag,
-                "Data": pd.Timestamp(dt),
+                "Agente":      ag,
+                "Data":        pd.Timestamp(dt),
                 "% Produtivo": round(prod / total * 100, 1) if total > 0 else 0.0,
             })
 
@@ -229,7 +233,7 @@ def _historico_linha(df_hist: pd.DataFrame):
         y=80, line_dash="dash",
         line_color="red", annotation_text="Meta 80%",
     )
-    fig.update_layout(**_LAYOUT_BASE, yaxis_range=[0, 110])
+    fig.update_layout(**_LAYOUT, yaxis_range=[0, 110])
     return fig
 
 
@@ -269,43 +273,24 @@ def render(df_hist: pd.DataFrame, limite_alerta: int):
         st.warning("Sem dados para o dia e agentes selecionados.")
         return
 
-    # ── KPIs ──────────────────────────────────────────────────────────────────
+    # KPIs
     k = _kpis(df_dia)
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric(
-        "🟢 Produtivo",
-        f"{k['pct_prod']:.1f}%",
-        f"{k['prod_min']:.0f} min",
-    )
-    c2.metric(
-        "🟡 Em Pausa",
-        f"{k['pct_pausa']:.1f}%",
-        f"{k['pausa_min']:.0f} min",
-    )
-    c3.metric(
-        "🔴 Fora/Offline",
-        f"{k['pct_fora']:.1f}%",
-        f"{k['fora_min']:.0f} min",
-    )
-    c4.metric(
-        "👥 Agentes com login",
-        k["n_agentes"],
-        f"de {len(agentes_sel)} selecionados",
-    )
+    c1.metric("🟢 Produtivo",         f"{k['pct_prod']:.1f}%",  f"{k['prod_min']:.0f} min")
+    c2.metric("🟡 Em Pausa",          f"{k['pct_pausa']:.1f}%", f"{k['pausa_min']:.0f} min")
+    c3.metric("🔴 Fora/Offline",      f"{k['pct_fora']:.1f}%",  f"{k['fora_min']:.0f} min")
+    c4.metric("👥 Agentes com login", k["n_agentes"],
+              f"de {len(agentes_sel)} selecionados")
 
     st.divider()
 
-    # ── Gantt ─────────────────────────────────────────────────────────────────
+    # Gantt
     st.subheader("📈 Timeline de Status")
-    st.plotly_chart(
-        _gantt(df_dia),
-        use_container_width=True,
-        key="dash_gantt",
-    )
+    st.plotly_chart(_gantt(df_dia), use_container_width=True, key="dash_gantt")
 
     st.divider()
 
-    # ── Ranking ───────────────────────────────────────────────────────────────
+    # Ranking
     st.subheader("🏆 Ranking de Aderência Produtiva")
     fig_rank, df_rank = _ranking(df_dia)
     st.plotly_chart(fig_rank, use_container_width=True, key="dash_ranking")
@@ -314,7 +299,7 @@ def render(df_hist: pd.DataFrame, limite_alerta: int):
 
     st.divider()
 
-    # ── Alertas ───────────────────────────────────────────────────────────────
+    # Alertas
     st.subheader(f"⚠️ Alertas: pausas/ausências ≥ {limite_alerta} min")
     df_al = _alertas(df_dia, limite_alerta)
     if df_al.empty:
@@ -325,7 +310,7 @@ def render(df_hist: pd.DataFrame, limite_alerta: int):
 
     st.divider()
 
-    # ── Evolução histórica ────────────────────────────────────────────────────
+    # Histórico
     st.subheader("📅 Evolução Histórica")
     fig_hist = _historico_linha(df_hist)
     if fig_hist:
@@ -335,7 +320,7 @@ def render(df_hist: pd.DataFrame, limite_alerta: int):
 
     st.divider()
 
-    # ── Export ────────────────────────────────────────────────────────────────
+    # Export
     st.subheader("💾 Exportar")
     ce1, ce2 = st.columns(2)
     ce1.download_button(
@@ -343,12 +328,12 @@ def render(df_hist: pd.DataFrame, limite_alerta: int):
         data=_to_xlsx(df_dia),
         file_name=f"status_{data_sel}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="dash_export_dia",
+        key="dash_exp_dia",
     )
     ce2.download_button(
         "⬇️ Histórico completo (XLSX)",
         data=_to_xlsx(df_hist),
         file_name="historico_status_agentes.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="dash_export_hist",
+        key="dash_exp_hist",
     )
