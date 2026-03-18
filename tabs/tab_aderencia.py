@@ -4,6 +4,8 @@ import json
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+from config import PALETA_STATUS
 from utils.storage import carregar_escala
 from config import ESTADOS_PRODUTIVOS, DIAS_SEMANA_ORDEM
 
@@ -27,6 +29,118 @@ def _hhmm_para_min(hhmm: str) -> int:
     except Exception:
         return 0
 
+# ___ GANTT ADERÊNCIA __________
+
+def gantt_aderencia(df_hist, df_escala, agente, data):
+    """
+    Monta um Gantt com:
+      - linha do turno planejado
+      - blocos de status reais no dia
+    para um agente específico.
+    """
+    data = pd.to_datetime(data).date()
+
+    # escala do agente para o dia da semana correspondente
+    dia_semana = pd.Timestamp(data).dayofweek  # 0=Seg
+    esc = df_escala[
+        (df_escala["agente"] == agente) &
+        (df_escala["dia_semana_num"] == dia_semana)
+    ]
+    if esc.empty:
+        return go.Figure()
+
+    esc = esc.iloc[0]
+    turno_ini_str = esc["turno_inicio"]
+    turno_fim_str = esc["turno_fim"]
+
+    t_ini_min = int(turno_ini_str.split(":")[0]) * 60 + int(turno_ini_str.split(":")[1])
+    t_fim_min = int(turno_fim_str.split(":")[0]) * 60 + int(turno_fim_str.split(":")[1])
+
+    # histórico real
+    df_dia = df_hist[
+        (df_hist["agente"] == agente) &
+        (df_hist["data"]   == data)
+    ].copy()
+    if df_dia.empty:
+        return go.Figure()
+
+    # converte início/fim para minutos desde meia-noite
+    df_dia["ini_min"] = (
+        df_dia["inicio"].dt.hour * 60 + df_dia["inicio"].dt.minute
+    )
+    df_dia["fim_min"] = (
+        df_dia["fim"].dt.hour * 60 + df_dia["fim"].dt.minute
+    )
+
+    fig = go.Figure()
+
+    # 1) Turno planejado (faixa cinza de fundo)
+    fig.add_trace(go.Bar(
+        x=[t_fim_min - t_ini_min],
+        y=["Turno planejado"],
+        base=[t_ini_min],
+        orientation="h",
+        marker_color="#eeeeee",
+        name="Turno planejado",
+        hovertemplate=(
+            f"Turno: {turno_ini_str} – {turno_fim_str}<extra></extra>"
+        ),
+    ))
+
+    # 2) Status reais
+    estados_vistos = set()
+    for _, row in df_dia.iterrows():
+        if row["fim_min"] <= row["ini_min"]:
+            continue
+        cor = PALETA_STATUS.get(row["estado"], "#bdc3c7")
+        show_leg = row["estado"] not in estados_vistos
+        estados_vistos.add(row["estado"])
+
+        fig.add_trace(go.Bar(
+            x=[row["fim_min"] - row["ini_min"]],
+            y=["Status real"],
+            base=[row["ini_min"]],
+            orientation="h",
+            marker_color=cor,
+            name=row["estado"],
+            legendgroup=row["estado"],
+            showlegend=show_leg,
+            hovertemplate=(
+                f"Status: {row['estado']}<br>"
+                f"Início: {row['inicio'].strftime('%H:%M')}<br>"
+                f"Fim: {row['fim'].strftime('%H:%M')}<br>"
+                f"Duração: {row['minutos']:.1f} min<extra></extra>"
+            ),
+        ))
+
+    # layout
+    tick_vals = list(range(0, 1441, 60))
+    tick_text = [f"{v//60:02d}:00" for v in tick_vals]
+
+    fig.update_layout(
+        barmode="overlay",
+        height=220,
+        title=f"Gantt Escala x Status – {agente} ({data.strftime('%d/%m/%Y')})",
+        xaxis=dict(
+            title="Hora",
+            tickvals=tick_vals,
+            ticktext=tick_text,
+            range=[0, 1440],
+            color="#111111",
+            gridcolor="#e0e0e0",
+        ),
+        yaxis=dict(
+            title="",
+            color="#111111",
+        ),
+        legend=dict(
+            title="Status",
+            font=dict(color="#111111"),
+        ),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+    )
+    return fig
 
 # ─── CÁLCULO DE ADERÊNCIA ─────────────────────────────────────────────────────
 
@@ -217,6 +331,32 @@ def render(df_hist: pd.DataFrame):
 
     st.divider()
 
+    # depois dos KPIs e antes/after dos gráficos de barra/linha
+
+st.divider()
+st.subheader("🗓️ Gantt Escala x Status (por agente/dia)")
+
+# opções disponíveis conforme o que já foi calculado em df_ad
+agentes_gantt = sorted(df_ad["Agente"].unique())
+datas_gantt   = sorted(df_ad["Data"].dt.date.unique())
+
+col_g1, col_g2 = st.columns(2)
+with col_g1:
+    ag_gantt = st.selectbox("Agente", agentes_gantt, key="ader_gantt_agente")
+with col_g2:
+    data_gantt = st.selectbox(
+        "Data",
+        datas_gantt,
+        format_func=lambda d: d.strftime("%d/%m/%Y"),
+        key="ader_gantt_data",
+    )
+
+fig_gantt = gantt_aderencia(df_hist, df_escala, ag_gantt, data_gantt)
+if len(fig_gantt.data) == 0:
+    st.info("Não há escala ou status para essa combinação de agente/data.")
+else:
+    st.plotly_chart(fig_gantt, use_container_width=True)
+    
     # ── Ranking por agente ────────────────────────────────────────────────────
     st.subheader("🏆 Aderência Média por Agente")
 
