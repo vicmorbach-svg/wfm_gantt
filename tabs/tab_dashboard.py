@@ -48,34 +48,65 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
     rotulos = [f"{h // 60:02d}:00" for h in horas]
 
     fig.update_layout(
-        barmode="overlay",
-        height=max(350, len(agentes) * 45 + 120),
-        title="Timeline de Status por Agente",
-        xaxis=dict(
-            title="Horário",
-            tickvals=horas,
-            ticktext=rotulos,
-            range=[0, 1440],
-        ),
-        yaxis_title="Agente",
-        legend_title="Status",
-        plot_bgcolor="#f8f9fa",
-        paper_bgcolor="#ffffff",
-    )
+    barmode="overlay",
+    height=max(300, len(agentes) * 55 + 120),
+    title="Timeline de Status por Agente",
+    xaxis=dict(
+        title="Hora do dia",
+        tickvals=tick_vals,
+        ticktext=tick_text,
+        range=[0, 1440],
+        showgrid=True,
+        gridcolor="#e0e0e0",
+        zeroline=False,
+        color="#111111",        # cor do texto do eixo X
+    ),
+    yaxis=dict(
+        title="Agente",
+        automargin=True,
+        color="#111111",        # cor do texto do eixo Y
+    ),
+    legend=dict(
+        title="Status",
+        font=dict(color="#111111"),
+    ),
+    title_font=dict(color="#111111"),
+    plot_bgcolor="#ffffff",
+    paper_bgcolor="#ffffff",
+)
     return fig
 
 
-def _kpis(df: pd.DataFrame) -> dict:
-    prod  = df[df["estado"].isin(ESTADOS_PRODUTIVOS)]["minutos"].sum()
-    pausa = df[df["estado"].isin(ESTADOS_PAUSA)]["minutos"].sum()
-    fora  = df[df["estado"].isin(ESTADOS_FORA)]["minutos"].sum()
+from config import ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_FORA
+
+def kpis_dia(df: pd.DataFrame) -> dict:
+    # agentes que ficaram online em algum momento no dia
+    agentes_com_online = df[
+        df["estado"].isin(ESTADOS_PRODUTIVOS)
+    ]["agente"].unique().tolist()
+
+    if not agentes_com_online:
+        # fallback: se ninguém ficou online, usa todo mundo pra não quebrar
+        df_base = df.copy()
+    else:
+        df_base = df[df["agente"].isin(agentes_com_online)].copy()
+
+    prod  = df_base[df_base["estado"].isin(ESTADOS_PRODUTIVOS)]["minutos"].sum()
+    pausa = df_base[df_base["estado"].isin(ESTADOS_PAUSA)]["minutos"].sum()
+    fora  = df_base[df_base["estado"].isin(ESTADOS_FORA)]["minutos"].sum()
+
     total = prod + pausa + fora
-    pct   = lambda v: round(v / total * 100, 1) if total > 0 else 0.0
+    if total == 0:
+        total = 1  # evita divisão por zero
+
     return {
-        "prod_min":  prod,   "pct_prod":  pct(prod),
-        "pausa_min": pausa,  "pct_pausa": pct(pausa),
-        "fora_min":  fora,   "pct_fora":  pct(fora),
-        "total_min": total,
+        "prod_min":  prod,
+        "pausa_min": pausa,
+        "fora_min":  fora,
+        "total_min": prod + pausa + fora,
+        "pct_prod":  prod  / total * 100,
+        "pct_pausa": pausa / total * 100,
+        "pct_fora":  fora  / total * 100,
     }
 
 
