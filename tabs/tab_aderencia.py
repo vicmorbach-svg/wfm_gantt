@@ -2,7 +2,6 @@ import io
 import json
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from utils.storage import carregar_escala
 from config import (
@@ -14,12 +13,6 @@ from config import (
 _TICK_VALS = list(range(0, 1441, 60))
 _TICK_TEXT = [f"{v // 60:02d}:00" for v in _TICK_VALS]
 
-_LAYOUT = dict(
-    template="plotly_white",
-    plot_bgcolor="#ffffff",
-    paper_bgcolor="#ffffff",
-    font=dict(color="#111111", size=12),
-)
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -38,6 +31,26 @@ def _hhmm_para_min(hhmm: str) -> int:
         return 0
 
 
+def _layout_branco(fig: go.Figure, title: str = "", height: int = 400) -> go.Figure:
+    """Aplica estilo branco padronizado em qualquer Figure."""
+    fig.update_layout(
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font=dict(color="#111111", size=12),
+        title=dict(text=title, font=dict(color="#111111")),
+        height=height,
+        xaxis=dict(tickfont=dict(color="#111111"), titlefont=dict(color="#111111")),
+        yaxis=dict(tickfont=dict(color="#111111"), titlefont=dict(color="#111111")),
+        legend=dict(
+            font=dict(color="#111111"),
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="#cccccc",
+            borderwidth=1,
+        ),
+    )
+    return fig
+
+
 # ─── GANTT ESCALA x STATUS ────────────────────────────────────────────────────
 
 def _gantt_aderencia(
@@ -49,23 +62,22 @@ def _gantt_aderencia(
     data_date = pd.Timestamp(data).date()
     dia_num   = pd.Timestamp(data_date).dayofweek
 
+    fig = go.Figure(layout=go.Layout(template="plotly_white"))
+
     esc_rows = df_escala[
         (df_escala["agente"] == agente) &
         (df_escala["dia_semana_num"] == dia_num)
     ]
 
-    fig = go.Figure()
-
     if esc_rows.empty:
-        fig.update_layout(
-            **_LAYOUT,
-            title=f"Sem escala cadastrada para {agente} "
-                  f"em {DIAS_SEMANA_ORDEM[dia_num]}",
+        _layout_branco(
+            fig,
+            title=f"Sem escala cadastrada para {agente} em {DIAS_SEMANA_ORDEM[dia_num]}",
             height=200,
         )
         return fig
 
-    esc = esc_rows.iloc[0]
+    esc       = esc_rows.iloc[0]
     t_ini_str = esc["turno_inicio"]
     t_fim_str = esc["turno_fim"]
     t_ini_min = _hhmm_para_min(t_ini_str)
@@ -86,16 +98,14 @@ def _gantt_aderencia(
         name="Turno planejado",
         legendgroup="Turno planejado",
         showlegend=True,
-        hovertemplate=(
-            f"Turno: {t_ini_str} – {t_fim_str}<extra></extra>"
-        ),
+        hovertemplate=f"Turno: {t_ini_str} – {t_fim_str}<extra></extra>",
     ))
 
     # Intervalos planejados
     iv_vis = set()
     for iv in intervalos:
         iv_ini = _hhmm_para_min(iv.get("inicio", ""))
-        iv_fim = _hhmm_para_min(iv.get("fim", ""))
+        iv_fim = _hhmm_para_min(iv.get("fim",    ""))
         nome   = iv.get("nome", "Intervalo")
         if iv_fim > iv_ini:
             show = nome not in iv_vis
@@ -119,7 +129,7 @@ def _gantt_aderencia(
     # ── Linha 2: Status reais ────────────────────────────────────────────────
     df_dia = df_hist[
         (df_hist["agente"] == agente) &
-        (df_hist["data"] == data_date)
+        (df_hist["data"]   == data_date)
     ].copy()
 
     if df_dia.empty:
@@ -131,12 +141,12 @@ def _gantt_aderencia(
         )
     else:
         df_dia["ini_min"] = (
-            df_dia["inicio"].dt.hour * 60 +
+            df_dia["inicio"].dt.hour   * 60 +
             df_dia["inicio"].dt.minute +
             df_dia["inicio"].dt.second / 60
         )
         df_dia["fim_min"] = (
-            df_dia["fim"].dt.hour * 60 +
+            df_dia["fim"].dt.hour   * 60 +
             df_dia["fim"].dt.minute +
             df_dia["fim"].dt.second / 60
         )
@@ -169,14 +179,17 @@ def _gantt_aderencia(
             ))
 
     fig.update_layout(
-        **_LAYOUT,
         barmode="overlay",
         height=300,
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font=dict(color="#111111", size=12),
         title=dict(
             text=(
                 f"Escala x Status — {agente}  "
                 f"({pd.Timestamp(data_date).strftime('%d/%m/%Y')})"
             ),
+            font=dict(color="#111111"),
         ),
         xaxis=dict(
             title="Hora do dia",
@@ -289,10 +302,7 @@ def render(df_hist: pd.DataFrame):
     df_escala = carregar_escala()
 
     if df_escala.empty:
-        st.warning(
-            "Configure a escala dos agentes na aba "
-            "**📅 Configurar Escala** primeiro."
-        )
+        st.warning("Configure a escala na aba **📅 Configurar Escala** primeiro.")
         return
 
     if df_hist.empty:
@@ -395,26 +405,38 @@ def render(df_hist: pd.DataFrame):
     )
     df_rank["Aderência Média (%)"] = df_rank["Aderência Média (%)"].round(1)
 
-    fig_rank = px.bar(
-        df_rank,
-        x="Agente", y="Aderência Média (%)",
-        color="Aderência Média (%)",
-        color_continuous_scale="RdYlGn",
-        range_color=[0, 100],
-        text="Aderência Média (%)",
-        title="Aderência Média por Agente",
-        template="plotly_white",
-    )
-    fig_rank.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+    fig_rank = go.Figure(layout=go.Layout(template="plotly_white"))
+    fig_rank.add_trace(go.Bar(
+        x=df_rank["Agente"],
+        y=df_rank["Aderência Média (%)"],
+        marker=dict(
+            color=df_rank["Aderência Média (%)"],
+            colorscale="RdYlGn",
+            cmin=0, cmax=100,
+            showscale=False,
+        ),
+        text=df_rank["Aderência Média (%)"].apply(lambda v: f"{v:.1f}%"),
+        textposition="outside",
+    ))
     fig_rank.add_hline(
         y=meta, line_dash="dash",
-        line_color="red", annotation_text=f"Meta {meta}%",
+        line_color="red",
+        annotation_text=f"Meta {meta}%",
+        annotation_font_color="#111111",
     )
     fig_rank.update_layout(
-        **_LAYOUT,
-        coloraxis_showscale=False,
-        yaxis_range=[0, 115],
-        xaxis_tickangle=-30,
+        title=dict(text="Aderência Média por Agente", font=dict(color="#111111")),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font=dict(color="#111111", size=12),
+        yaxis=dict(
+            range=[0, 115],
+            title="Aderência Média (%)",
+            tickfont=dict(color="#111111"),
+            titlefont=dict(color="#111111"),
+        ),
+        xaxis=dict(tickangle=-30, tickfont=dict(color="#111111")),
+        margin=dict(t=60, b=80),
     )
     st.plotly_chart(fig_rank, use_container_width=True, key="ader_fig_rank")
 
@@ -423,18 +445,34 @@ def render(df_hist: pd.DataFrame):
     # ── Evolução dia a dia ────────────────────────────────────────────────────
     st.subheader("📈 Evolução da Aderência por Dia")
 
-    fig_ev = px.line(
-        df_ad.sort_values("Data"),
-        x="Data", y="% Aderência",
-        color="Agente", markers=True,
-        title="Aderência ao longo do tempo",
-        template="plotly_white",
-    )
+    fig_ev = go.Figure(layout=go.Layout(template="plotly_white"))
+    for ag in sorted(df_ad["Agente"].unique()):
+        d = df_ad[df_ad["Agente"] == ag].sort_values("Data")
+        fig_ev.add_trace(go.Scatter(
+            x=d["Data"], y=d["% Aderência"],
+            mode="lines+markers",
+            name=ag,
+            hovertemplate=f"<b>{ag}</b><br>%{{x}}<br>%{{y:.1f}}%<extra></extra>",
+        ))
     fig_ev.add_hline(
         y=meta, line_dash="dash",
-        line_color="red", annotation_text=f"Meta {meta}%",
+        line_color="red",
+        annotation_text=f"Meta {meta}%",
+        annotation_font_color="#111111",
     )
-    fig_ev.update_layout(**_LAYOUT, yaxis_range=[0, 115])
+    fig_ev.update_layout(
+        title=dict(text="Aderência ao longo do tempo", font=dict(color="#111111")),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font=dict(color="#111111", size=12),
+        yaxis=dict(
+            range=[0, 115],
+            tickfont=dict(color="#111111"),
+            titlefont=dict(color="#111111"),
+        ),
+        xaxis=dict(tickfont=dict(color="#111111")),
+        legend=dict(font=dict(color="#111111")),
+    )
     st.plotly_chart(fig_ev, use_container_width=True, key="ader_fig_ev")
 
     st.divider()
@@ -452,15 +490,33 @@ def render(df_hist: pd.DataFrame):
     dias_ok  = [d for d in DIAS_SEMANA_ORDEM if d in df_pivot.columns]
     df_pivot = df_pivot[dias_ok]
 
-    fig_heat = px.imshow(
-        df_pivot,
-        color_continuous_scale="RdYlGn",
-        zmin=0, zmax=100,
-        text_auto=".1f",
-        title="Aderência Média (%) por Agente × Dia da Semana",
-        template="plotly_white",
+    fig_heat = go.Figure(
+        data=go.Heatmap(
+            z=df_pivot.values,
+            x=df_pivot.columns.tolist(),
+            y=df_pivot.index.tolist(),
+            colorscale="RdYlGn",
+            zmin=0, zmax=100,
+            text=df_pivot.values.round(1),
+            texttemplate="%{text:.1f}%",
+            hovertemplate=(
+                "Agente: %{y}<br>"
+                "Dia: %{x}<br>"
+                "Aderência: %{z:.1f}%<extra></extra>"
+            ),
+        )
     )
-    fig_heat.update_layout(**_LAYOUT)
+    fig_heat.update_layout(
+        title=dict(
+            text="Aderência Média (%) por Agente × Dia da Semana",
+            font=dict(color="#111111"),
+        ),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font=dict(color="#111111", size=12),
+        xaxis=dict(tickfont=dict(color="#111111"), title="Dia da Semana"),
+        yaxis=dict(tickfont=dict(color="#111111"), title="Agente"),
+    )
     st.plotly_chart(fig_heat, use_container_width=True, key="ader_fig_heat")
 
     st.divider()
@@ -473,9 +529,7 @@ def render(df_hist: pd.DataFrame):
 
     def _color(val):
         if isinstance(val, (int, float)):
-            return (
-                f"background-color: {'#d4edda' if val >= meta else '#f8d7da'}"
-            )
+            return f"background-color: {'#d4edda' if val >= meta else '#f8d7da'}"
         return ""
 
     st.dataframe(
