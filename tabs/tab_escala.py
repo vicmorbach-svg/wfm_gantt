@@ -1,3 +1,4 @@
+import io
 import json
 import streamlit as st
 import pandas as pd
@@ -5,6 +6,20 @@ from datetime import time
 from config import DIAS_SEMANA_ORDEM
 from utils.storage import carregar_escala, salvar_escala, escala_para_display
 
+def df_to_xlsx(df: pd.DataFrame) -> bytes:
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
+    return output.getvalue()
+
+
+def _validar_hora(hora_str: str) -> bool:
+    """Valida se a string está no formato HH:MM."""
+    try:
+        h, m = hora_str.strip().split(":")
+        return 0 <= int(h) <= 23 and 0 <= int(m) <= 59
+    except Exception:
+        return False
 
 def render(agentes: list):
     st.header("📅 Configurar Escala dos Agentes")
@@ -38,8 +53,8 @@ def render(agentes: list):
                          "Quinta-feira", "Sexta-feira"],
             )
         with col2:
-            turno_ini = st.time_input("🕐 Início do turno", value=time(8, 0))
-            turno_fim = st.time_input("🕔 Fim do turno",    value=time(17, 0))
+            turno_ini = st.text_input("🕐 Início do turno", value="08:00",placeholder="HH:MM")
+            turno_fim = st.text_input("🕔 Fim do turno", value="17:00",placeholder="HH:MM")
 
         observacao = st.text_input("📝 Observação (opcional)", "")
 
@@ -56,10 +71,10 @@ def render(agentes: list):
                 nome_int = st.text_input(f"Nome #{i+1}", f"Intervalo {i+1}",
                                          key=f"int_nome_{i}")
             with cb:
-                ini_int  = st.time_input(f"Início #{i+1}", value=time(12, 0),
+                ini_int  = st.text_input(f"Início #{i+1}", value="12:00", placeholder="HH:MM",
                                          key=f"int_ini_{i}")
             with cc:
-                fim_int  = st.time_input(f"Fim #{i+1}",    value=time(13, 0),
+                fim_int  = st.text_input(f"Fim #{i+1}",    value="13:00", placeholder="HH:MM",
                                          key=f"int_fim_{i}")
             intervalos.append({
                 "nome":   nome_int,
