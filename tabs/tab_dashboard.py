@@ -1,12 +1,13 @@
+# tabs/tab_dashboard.py
 import io
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 from config import (
     PALETA_STATUS, ESTADOS_PRODUTIVOS,
     ESTADOS_PAUSA, ESTADOS_FORA,
 )
+from utils.data_loader import get_agentes
 
 # ─── CONSTANTES ───────────────────────────────────────────────────────────────
 
@@ -23,25 +24,10 @@ def _to_xlsx(df: pd.DataFrame) -> bytes:
     return buf.getvalue()
 
 
-def _apply_layout(fig: go.Figure, extra: dict = None):
-    """Aplica layout padrão branco no figura."""
-    base = dict(
-        plot_bgcolor="#ffffff",
-        paper_bgcolor="#ffffff",
-        font=dict(color="#111111", size=12),
-    )
-    if extra:
-        base.update(extra)
-    fig.update_layout(**base)
-    return fig
-
-
 # ─── GANTT ────────────────────────────────────────────────────────────────────
 
 def _gantt(df: pd.DataFrame) -> go.Figure:
-    # Cria figura já com template branco
-    fig = go.Figure(layout=go.Layout(template="plotly_white"))
-
+    fig = go.Figure()
     agentes = sorted(df["agente"].unique(), reverse=True)
     estados_vis = set()
 
@@ -92,7 +78,7 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
             font=dict(color="#111111"),
         ),
         xaxis=dict(
-            title="Hora do dia",
+            title=dict(text="Hora do dia", font=dict(color="#111111")),
             tickvals=_TICK_VALS,
             ticktext=_TICK_TEXT,
             range=[0, 1440],
@@ -100,12 +86,10 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
             gridcolor="#e5e5e5",
             zeroline=False,
             tickfont=dict(color="#111111"),
-            titlefont=dict(color="#111111"),
         ),
         yaxis=dict(
-            title="",
+            title=dict(text="", font=dict(color="#111111")),
             tickfont=dict(color="#111111"),
-            titlefont=dict(color="#111111"),
             automargin=True,
         ),
         legend=dict(
@@ -123,10 +107,6 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
 # ─── KPIs ─────────────────────────────────────────────────────────────────────
 
 def _kpis(df: pd.DataFrame) -> dict:
-    """
-    Calcula KPIs apenas sobre agentes que tiveram
-    ao menos um registro Online no dia selecionado.
-    """
     agentes_online = df[
         df["estado"].isin(ESTADOS_PRODUTIVOS)
     ]["agente"].unique()
@@ -175,7 +155,7 @@ def _ranking(df: pd.DataFrame):
 
     df_r = pd.DataFrame(rows).sort_values("% Produtivo", ascending=False)
 
-    fig = go.Figure(layout=go.Layout(template="plotly_white"))
+    fig = go.Figure()
     fig.add_trace(go.Bar(
         x=df_r["Agente"],
         y=df_r["% Produtivo"],
@@ -188,27 +168,26 @@ def _ranking(df: pd.DataFrame):
         ),
         text=df_r["% Produtivo"].apply(lambda v: f"{v:.1f}%"),
         textposition="outside",
-        hovertemplate=(
-            "<b>%{x}</b><br>"
-            "% Produtivo: %{y:.1f}%<extra></extra>"
-        ),
+        hovertemplate="<b>%{x}</b><br>% Produtivo: %{y:.1f}%<extra></extra>",
     ))
     fig.update_layout(
-        title=dict(text="% Tempo Produtivo por Agente", font=dict(color="#111111")),
+        title=dict(
+            text="% Tempo Produtivo por Agente",
+            font=dict(color="#111111"),
+        ),
         plot_bgcolor="#ffffff",
         paper_bgcolor="#ffffff",
         font=dict(color="#111111", size=12),
         yaxis=dict(
             range=[0, 115],
+            title=dict(text="% Produtivo", font=dict(color="#111111")),
             tickfont=dict(color="#111111"),
-            titlefont=dict(color="#111111"),
-            title="% Produtivo",
         ),
         xaxis=dict(
             tickangle=-30,
             tickfont=dict(color="#111111"),
         ),
-        margin=dict(t=60, b=80),
+        margin=dict(t=60, b=100),
     )
     return fig, df_r
 
@@ -256,37 +235,40 @@ def _historico_linha(df_hist: pd.DataFrame):
     if df_ev.empty:
         return None
 
-    fig = go.Figure(layout=go.Layout(template="plotly_white"))
+    fig = go.Figure()
     for ag in df_ev["Agente"].unique():
         d = df_ev[df_ev["Agente"] == ag]
         fig.add_trace(go.Scatter(
-            x=d["Data"], y=d["% Produtivo"],
+            x=d["Data"],
+            y=d["% Produtivo"],
             mode="lines+markers",
             name=ag,
             hovertemplate=f"<b>{ag}</b><br>%{{x}}<br>%{{y:.1f}}%<extra></extra>",
         ))
 
     fig.add_hline(
-        y=80, line_dash="dash",
+        y=80,
+        line_dash="dash",
         line_color="red",
         annotation_text="Meta 80%",
         annotation_font_color="#111111",
     )
     fig.update_layout(
-        title=dict(text="Evolução Histórica – % Tempo Produtivo", font=dict(color="#111111")),
+        title=dict(
+            text="Evolução Histórica – % Tempo Produtivo",
+            font=dict(color="#111111"),
+        ),
         plot_bgcolor="#ffffff",
         paper_bgcolor="#ffffff",
         font=dict(color="#111111", size=12),
         yaxis=dict(
             range=[0, 110],
+            title=dict(text="% Produtivo", font=dict(color="#111111")),
             tickfont=dict(color="#111111"),
-            title="% Produtivo",
-            titlefont=dict(color="#111111"),
         ),
         xaxis=dict(
+            title=dict(text="Data", font=dict(color="#111111")),
             tickfont=dict(color="#111111"),
-            title="Data",
-            titlefont=dict(color="#111111"),
         ),
         legend=dict(font=dict(color="#111111")),
     )
@@ -302,8 +284,8 @@ def render(df_hist: pd.DataFrame, limite_alerta: int):
         st.info("Faça o upload de um relatório na barra lateral para começar.")
         return
 
-    datas   = sorted(df_hist["data"].unique(), reverse=True)
-    agentes = sorted(df_hist["agente"].unique().tolist())
+    agentes_disp = get_agentes(df_hist)
+    datas        = sorted(df_hist["data"].unique(), reverse=True)
 
     col_f1, col_f2 = st.columns([1, 3])
     with col_f1:
@@ -316,7 +298,7 @@ def render(df_hist: pd.DataFrame, limite_alerta: int):
         )
     with col_f2:
         agentes_sel = st.multiselect(
-            "👤 Agentes", agentes, default=agentes,
+            "👤 Agentes", agentes_disp, default=agentes_disp,
             key="dash_agentes_sel",
         )
 
@@ -357,7 +339,11 @@ def render(df_hist: pd.DataFrame, limite_alerta: int):
 
     # ── Gantt ─────────────────────────────────────────────────────────────────
     st.subheader("📈 Timeline de Status")
-    st.plotly_chart(_gantt(df_dia), use_container_width=True, key="dash_gantt")
+    st.plotly_chart(
+        _gantt(df_dia),
+        use_container_width=True,
+        key="dash_gantt",
+    )
 
     st.divider()
 
@@ -392,16 +378,16 @@ def render(df_hist: pd.DataFrame, limite_alerta: int):
     st.divider()
 
     # ── Export ────────────────────────────────────────────────────────────────
-    st.subheader("💾 Exportar")
-    ce1, ce2 = st.columns(2)
-    ce1.download_button(
+    st.subheader("💾 Exportar Dados")
+    c_e1, c_e2 = st.columns(2)
+    c_e1.download_button(
         "⬇️ Dia selecionado (XLSX)",
         data=_to_xlsx(df_dia),
         file_name=f"status_{data_sel}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="dash_exp_dia",
     )
-    ce2.download_button(
+    c_e2.download_button(
         "⬇️ Histórico completo (XLSX)",
         data=_to_xlsx(df_hist),
         file_name="historico_status_agentes.xlsx",
