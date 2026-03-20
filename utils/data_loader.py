@@ -1,191 +1,117 @@
-# utils/data_loader.py
+import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-from config import ESTADOS_EXCLUIR, DIAS_SEMANA_ORDEM, ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_FORA
+from config import ESTADOS_EXCLUIR, DIAS_SEMANA_ORDEM
 
+# ─── FUNÇÕES DE CARREGAMENTO E PRÉ-PROCESSAMENTO ──────────────────────────────
+
+@st.cache_data(ttl=3600) # Cacheia os dados por 1 hora
 def processar_arquivo(uploaded_file) -> pd.DataFrame:
-    """
-    Processa um arquivo de upload (Excel ou CSV) do Zendesk Explore,
-    padroniza colunas, converte tipos e trata a passagem de dia.
-    """
-    try:
-        if uploaded_file.name.endswith(".csv"):
-            df = pd.read_csv(uploaded_file)
-        else: # Assume xlsx ou xls
-            df = pd.read_excel(uploaded_file)
-    except Exception as e:
-        st.error(f"Erro ao ler o arquivo {uploaded_file.name}: {e}")
+    if uploaded_file is None:
         return pd.DataFrame()
 
-    # Renomear colunas para padronizar
+    try:
+        # Tenta ler como Excel
+        df = pd.read_excel(uploaded_file)
+    except Exception:
+        st.error("Formato de arquivo inválido. Por favor, suba um arquivo Excel (.xlsx).")
+        return pd.DataFrame()
+
+    # Renomear colunas para padronizar (ajustado para o nome exato da planilha)
     df = df.rename(columns={
-        "Nome do agente":                      "agente",
-        "Hora de início do estado - Carimbo de data/hora": "inicio",
-        "Hora de fim do estado - Carimbo de data/hora":    "fim",
-        "Nome do estado":                      "estado",
-        "Tempo do agente no estado / Minutos": "minutos",
+        "Agent Name": "agente",
+        "Start Time": "inicio",
+        "End Time": "fim",
+        "Status": "estado",
+        "Duration (min)": "minutos", # A coluna já existe e pode ser usada
     })
 
-    # Selecionar e reordenar colunas de interesse
-    cols_interesse = ["agente", "inicio", "fim", "estado", "minutos"]
-    df = df[cols_interesse]
-
-    # Converter para datetime, tratando erros
-    df["inicio"] = pd.to_datetime(df["inicio"], errors='coerce')
-    df["fim"]    = pd.to_datetime(df["fim"], errors='coerce') # <-- CORREÇÃO AQUI
-
-    # Remover linhas com valores NaT após a conversão
-    df.dropna(subset=["inicio", "fim"], inplace=True)
-
-    # Remover estados que devem ser excluídos (ex: "Invisible")
-    df = df[~df["estado"].isin(ESTADOS_EXCLUIR)]
-
-    # Garantir que 'minutos' seja numérico, preenchendo NaN com 0
-    df["minutos"] = pd.to_numeric(df["minutos"], errors='coerce').fillna(0)
-
-    # Filtrar eventos com duração zero ou negativa (após conversão)
-    df = df[df["minutos"] > 0]
-
-    # --- Lógica para tratar eventos que atravessam a meia-noite ---
-    df_split = []
-    for _, row in df.iterrows():
-        inicio_dia = row["inicio"].normalize()
-        fim_dia    = row["fim"].normalize()
-
-        if inicio_dia == fim_dia:
-            # Evento no mesmo dia
-            df_split.append(row)
-        else:
-            # Evento atravessa a meia-noite
-            # Parte 1: do início até o fim do primeiro dia
-            row1 = row.copy()
-            row1["fim"] = inicio_dia + timedelta(days=1) - timedelta(microseconds=1)
-            row1["minutos"] = (row1["fim"] - row1["inicio"]).total_seconds() / 60
-            df_split.append(row1)
-
-            # Parte 2: do início do segundo dia até o fim original
-            row2 = row.copy()
-            row2["inicio"] = fim_dia
-            row2["minutos"] = (row2["fim"] - row2["inicio"]).total_seconds() / 60
-            df_split.append(row2)
-
-    df = pd.DataFrame(df_split)
-
-    # Recalcular minutos para garantir consistência após split
-    df["minutos"] = (df["fim"] - df["inicio"]).dt.total_seconds() / 60
-    df = df[df["minutos"] > 0] # Remover eventos com duração zero após split
-
-    # Adicionar coluna de data para facilitar filtros
-    df["data"] = df["inicio"].dt.normalize()
-
-    # Adicionar dia da semana
-    df["dia_semana"] = df["inicio"].dt.day_name(locale='pt_BR.utf8')
-    df["dia_semana_num"] = df["inicio"].dt.dayofweek
-
-    return df
-
-def get_agentes(df_hist: pd.DataFrame) -> list:
-    """Retorna a lista de agentes únicos do histórico."""
-    if df_hist.empty:
-        return []
-    return sorted(df_hist["agente"].unique().tolist())
-
-def calcular_aderencia(df_hist: pd.DataFrame, df_escala: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calcula a aderência de cada agente à sua escala para cada dia.
-    Considera o tempo produtivo dentro do turno planejado, excluindo intervalos.
-    """
-    if df_hist.empty or df_escala.empty:
+    # Selecionar e reordenar colunas
+    colunas_esperadas = ["agente", "inicio", "fim", "estado", "minutos"]
+    if not all(col in df.columns for col in colunas_esperadas):
+        st.error(
+            "O arquivo Excel não contém todas as colunas esperadas: "
+            f"{', '.join(colunas_esperadas)}. "
+            "Verifique se o nome das colunas está correto."
+        )
         return pd.DataFrame()
 
-    df_aderencia_rows = []
+    df = df[colunas_esperadas].copy()
 
-    for _, escala_row in df_escala.iterrows():
-        agente = escala_row["agente"]
-        dia_semana_num = escala_row["dia_semana_num"]
-        turno_inicio_str = escala_row["turno_inicio"]
-        turno_fim_str = escala_row["turno_fim"]
-        intervalos = json.loads(escala_row["intervalos_json"])
+    # Converter colunas de tempo para datetime, tratando erros
+    df["inicio"] = pd.to_datetime(df["inicio"], errors='coerce')
+    df["fim"]    = pd.to_datetime(df["fim"], errors='coerce')
 
-        # Filtrar histórico para o agente e dias da semana da escala
-        df_agente_dias = df_hist[
-            (df_hist["agente"] == agente) &
-            (df_hist["dia_semana_num"] == dia_semana_num)
-        ].copy()
+    # Remover linhas onde 'inicio' ou 'fim' são NaT (erros de conversão)
+    df.dropna(subset=["inicio", "fim"], inplace=True)
 
-        if df_agente_dias.empty:
-            continue
+    # Remover estados indesejados (ex: "Invisible")
+    df = df[~df["estado"].isin(ESTADOS_EXCLUIR)].copy()
 
-        for data_dia in df_agente_dias["data"].unique():
-            df_dia_agente = df_agente_dias[df_agente_dias["data"] == data_dia].copy()
+    # Garantir que 'minutos' seja numérico, tratando NaNs
+    df["minutos"] = pd.to_numeric(df["minutos"], errors='coerce').fillna(0)
 
-            # Converter horas do turno para datetime no dia específico
-            try:
-                turno_inicio_dt = pd.to_datetime(f"{data_dia.strftime('%Y-%m-%d')} {turno_inicio_str}")
-                turno_fim_dt = pd.to_datetime(f"{data_dia.strftime('%Y-%m-%d')} {turno_fim_str}")
-            except ValueError:
-                continue # Pular se a hora da escala for inválida
+    # Filtrar durações inválidas (fim <= inicio)
+    df = df[df["fim"] > df["inicio"]].copy()
 
-            # Calcular minutos planejados no turno (sem intervalos)
-            minutos_planejados_turno = (turno_fim_dt - turno_inicio_dt).total_seconds() / 60
+    # ── Tratamento de passagem de dia ──────────────────────────────────────────
+    # Divide eventos que cruzam a meia-noite em dois eventos separados
+    rows_split = []
+    for _, row in df.iterrows():
+        inicio_dt = row["inicio"]
+        fim_dt    = row["fim"]
 
-            minutos_intervalos_planejados = 0
-            for intervalo in intervalos:
-                try:
-                    int_ini_dt = pd.to_datetime(f"{data_dia.strftime('%Y-%m-%d')} {intervalo['inicio']}")
-                    int_fim_dt = pd.to_datetime(f"{data_dia.strftime('%Y-%m-%d')} {intervalo['fim']}")
-                    # Garantir que o intervalo esteja dentro do turno
-                    int_ini_dt = max(int_ini_dt, turno_inicio_dt)
-                    int_fim_dt = min(int_fim_dt, turno_fim_dt)
-                    if int_fim_dt > int_ini_dt:
-                        minutos_intervalos_planejados += (int_fim_dt - int_ini_dt).total_seconds() / 60
-                except ValueError:
-                    continue # Pular se a hora do intervalo for inválida
+        if inicio_dt.date() != fim_dt.date():
+            # Evento que cruza a meia-noite
+            meia_noite_inicio = datetime(
+                inicio_dt.year, inicio_dt.month, inicio_dt.day, 23, 59, 59
+            )
+            meia_noite_fim    = datetime(
+                fim_dt.year, fim_dt.month, fim_dt.day, 0, 0, 0
+            )
 
-            minutos_esperados_produtivos = minutos_planejados_turno - minutos_intervalos_planejados
-            if minutos_esperados_produtivos <= 0:
-                minutos_esperados_produtivos = 1 # Evitar divisão por zero, mas indicar que não há tempo produtivo esperado
+            # Parte 1: do início até o final do dia
+            duracao_p1 = (meia_noite_inicio - inicio_dt).total_seconds() / 60
+            if duracao_p1 > 0:
+                rows_split.append({
+                    "agente":  row["agente"],
+                    "inicio":  inicio_dt,
+                    "fim":     meia_noite_inicio,
+                    "estado":  row["estado"],
+                    "minutos": duracao_p1,
+                })
 
-            # Calcular minutos produtivos reais dentro do turno
-            minutos_produtivos_reais = 0
-            for _, status_row in df_dia_agente.iterrows():
-                if status_row["estado"] in ESTADOS_PRODUTIVOS:
-                    # Interseção do status real com o turno planejado
-                    real_ini = status_row["inicio"]
-                    real_fim = status_row["fim"]
+            # Parte 2: do início do próximo dia até o fim original
+            duracao_p2 = (fim_dt - meia_noite_fim).total_seconds() / 60
+            if duracao_p2 > 0:
+                rows_split.append({
+                    "agente":  row["agente"],
+                    "inicio":  meia_noite_fim,
+                    "fim":     fim_dt,
+                    "estado":  row["estado"],
+                    "minutos": duracao_p2,
+                })
+        else:
+            rows_split.append(row.to_dict())
 
-                    # Interseção com o turno
-                    inter_ini = max(real_ini, turno_inicio_dt)
-                    inter_fim = min(real_fim, turno_fim_dt)
+    df_processed = pd.DataFrame(rows_split)
 
-                    if inter_fim > inter_ini:
-                        minutos_no_turno = (inter_fim - inter_ini).total_seconds() / 60
+    # Adicionar coluna 'data' para facilitar filtros por dia
+    df_processed["data"] = df_processed["inicio"].dt.date
 
-                        # Subtrair minutos de intervalos planejados
-                        for intervalo in intervalos:
-                            try:
-                                int_ini_dt = pd.to_datetime(f"{data_dia.strftime('%Y-%m-%d')} {intervalo['inicio']}")
-                                int_fim_dt = pd.to_datetime(f"{data_dia.strftime('%Y-%m-%d')} {intervalo['fim']}")
-                                # Interseção do status com o intervalo
-                                int_status_ini = max(inter_ini, int_ini_dt)
-                                int_status_fim = min(inter_fim, int_fim_dt)
-                                if int_status_fim > int_status_ini:
-                                    minutos_no_turno -= (int_status_fim - int_status_ini).total_seconds() / 60
-                            except ValueError:
-                                continue
+    # Ordenar para garantir consistência
+    df_processed = df_processed.sort_values(
+        ["agente", "inicio"]
+    ).reset_index(drop=True)
 
-                        if minutos_no_turno > 0:
-                            minutos_produtivos_reais += minutos_no_turno
+    return df_processed
 
-            aderencia_pct = (minutos_produtivos_reais / minutos_esperados_produtivos) * 100 if minutos_esperados_produtivos > 0 else 0
+def get_agentes(df: pd.DataFrame) -> list:
+    if df.empty:
+        return []
+    return sorted(df["agente"].unique().tolist())
 
-            df_aderencia_rows.append({
-                "Agente": agente,
-                "Data": data_dia,
-                "Dia Semana": DIAS_SEMANA_ORDEM[dia_semana_num],
-                "Minutos Produtivos Reais": minutos_produtivos_reais,
-                "Minutos Esperados Produtivos": minutos_esperados_produtivos,
-                "% Aderência": aderencia_pct,
-            })
-
-    return pd.DataFrame(df_aderencia_rows)
+def get_datas(df: pd.DataFrame) -> list:
+    if df.empty:
+        return []
+    return sorted(df["data"].unique().tolist())
