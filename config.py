@@ -14,6 +14,10 @@ PALETA_STATUS = {
     "Feedback":                      "#1abc9c",
     "Categorização de atendimentos": "#16a085",
     "Transfers only":                "#27ae60",
+    "Unified online":                "#27ae60",
+    "Unified away":                  "#d35400",
+    "Unified offline":               "#7f8c8d",
+    "Invisible":                     "#bdc3c7",
 }
 
 ESTADOS_PRODUTIVOS = ["Online", "Transfers only", "Unified online"]
