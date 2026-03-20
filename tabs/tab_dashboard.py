@@ -1,24 +1,36 @@
 # tabs/tab_dashboard.py
+import io
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-
 from config import (
-    PALETA_STATUS,
-    ESTADOS_PRODUTIVOS,
-    ESTADOS_PAUSA,
-    ESTADOS_FORA,
+    PALETA_STATUS, ESTADOS_PRODUTIVOS,
+    ESTADOS_PAUSA, ESTADOS_FORA,
 )
 from utils.data_loader import get_agentes
 
+# ─── CONSTANTES ───────────────────────────────────────────────────────────────
 
-# ── GANTT ─────────────────────────────────────────────────────────────────────
+_TICK_VALS = list(range(0, 1441, 60))
+_TICK_TEXT = [f"{v // 60:02d}:00" for v in _TICK_VALS]
+
+
+# ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+def _to_xlsx(df: pd.DataFrame) -> bytes:
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        df.to_excel(w, index=False)
+    return buf.getvalue()
+
+
+# ─── GANTT ────────────────────────────────────────────────────────────────────
 
 def _gantt(df: pd.DataFrame) -> go.Figure:
-    fig = go.Figure()
-    agentes = sorted(df["agente"].unique())
-    estados_vistos = set()
+    fig = go.Figure(layout=go.Layout(template="plotly_white"))
+    agentes = sorted(df["agente"].unique(), reverse=True)
+    estados_vis = set()
 
     for agente in agentes:
         df_ag = df[df["agente"] == agente].sort_values("inicio")
@@ -27,58 +39,59 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
             fim = row["fim"]
             if pd.isna(ini) or pd.isna(fim):
                 continue
-
-            cor   = PALETA_STATUS.get(row["estado"], "#bdc3c7")
-            meia  = ini.replace(hour=0, minute=0, second=0, microsecond=0)
-            base  = (ini - meia).total_seconds() / 60
-            dur   = (fim - ini).total_seconds() / 60
+            meia = ini.replace(hour=0, minute=0, second=0, microsecond=0)
+            base = (ini - meia).total_seconds() / 60
+            dur  = (fim - ini).total_seconds() / 60
             if dur <= 0:
                 continue
 
-            label = row["estado"]
-            show  = label not in estados_vistos
-            estados_vistos.add(label)
+            estado = row["estado"]
+            cor    = PALETA_STATUS.get(estado, "#aaaaaa")
+            show   = estado not in estados_vis
+            estados_vis.add(estado)
 
             fig.add_trace(go.Bar(
                 x=[dur],
                 y=[agente],
                 base=[base],
                 orientation="h",
-                marker_color=cor,
-                name=label,
-                legendgroup=label,
+                marker=dict(color=cor, line=dict(width=0)),
+                name=estado,
+                legendgroup=estado,
                 showlegend=show,
                 hovertemplate=(
                     f"<b>{agente}</b><br>"
-                    f"Status: {row['estado']}<br>"
+                    f"Status: {estado}<br>"
                     f"Início: {ini.strftime('%H:%M')}<br>"
                     f"Fim: {fim.strftime('%H:%M')}<br>"
-                    f"Duração: {row.get('minutos', dur):.1f} min"
-                    "<extra></extra>"
+                    f"Duração: {dur:.1f} min<extra></extra>"
                 ),
             ))
 
-    horas   = list(range(0, 1441, 60))
-    rotulos = [f"{h // 60:02d}:00" for h in horas]
-
     fig.update_layout(
         barmode="overlay",
-        height=max(300, len(agentes) * 55 + 120),
-        title="Timeline de Status por Agente",
+        height=max(400, len(agentes) * 48 + 140),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font=dict(color="#111111", size=12),
+        title=dict(
+            text="Timeline de Status por Agente",
+            font=dict(color="#111111"),
+        ),
         xaxis=dict(
             title=dict(text="Hora do dia", font=dict(color="#111111")),
-            tickvals=horas,
-            ticktext=rotulos,
+            tickvals=_TICK_VALS,
+            ticktext=_TICK_TEXT,
             range=[0, 1440],
             showgrid=True,
-            gridcolor="#e0e0e0",
+            gridcolor="#e5e5e5",
             zeroline=False,
             tickfont=dict(color="#111111"),
         ),
         yaxis=dict(
-            title=dict(text="Agente", font=dict(color="#111111")),
-            automargin=True,
+            title=dict(text="", font=dict(color="#111111")),
             tickfont=dict(color="#111111"),
+            automargin=True,
         ),
         legend=dict(
             title=dict(text="Status", font=dict(color="#111111")),
@@ -87,31 +100,34 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
             bordercolor="#cccccc",
             borderwidth=1,
         ),
-        plot_bgcolor="#ffffff",
-        paper_bgcolor="#ffffff",
-        title_font=dict(color="#111111"),
-        margin=dict(l=180, r=20, t=60, b=60),
+        margin=dict(l=140, r=20, t=60, b=50),
     )
     return fig
 
 
-# ── KPIs ──────────────────────────────────────────────────────────────────────
+# ─── KPIS ─────────────────────────────────────────────────────────────────────
 
-def kpis_dia(df: pd.DataFrame) -> dict:
-    agentes_com_online = df[df["estado"].isin(ESTADOS_PRODUTIVOS)]["agente"].unique()
+def _kpis(df: pd.DataFrame) -> dict:
+    # Agentes que tiveram algum status produtivo no dia
+    agentes_ativos = df[
+        df["estado"].isin(ESTADOS_PRODUTIVOS + ESTADOS_PAUSA + ESTADOS_FORA)
+    ]["agente"].unique().tolist()
 
-    if len(agentes_com_online) == 0:
-        df_base = df.copy()
-    else:
-        df_base = df[df["agente"].isin(agentes_com_online)].copy()
+    if not agentes_ativos:
+        return {
+            "prod_min": 0, "pausa_min": 0, "fora_min": 0, "total_min": 0,
+            "pct_prod": 0, "pct_pausa": 0, "pct_fora": 0, "n_agentes": 0,
+        }
+
+    df_base = df[df["agente"].isin(agentes_ativos)].copy()
 
     prod  = df_base[df_base["estado"].isin(ESTADOS_PRODUTIVOS)]["minutos"].sum()
     pausa = df_base[df_base["estado"].isin(ESTADOS_PAUSA)]["minutos"].sum()
     fora  = df_base[df_base["estado"].isin(ESTADOS_FORA)]["minutos"].sum()
-    total = prod + pausa + fora
 
+    total = prod + pausa + fora
     if total == 0:
-        total = 1
+        total = 1  # Evita divisão por zero
 
     return {
         "prod_min":  prod,
@@ -121,8 +137,11 @@ def kpis_dia(df: pd.DataFrame) -> dict:
         "pct_prod":  prod  / total * 100,
         "pct_pausa": pausa / total * 100,
         "pct_fora":  fora  / total * 100,
+        "n_agentes": len(agentes_ativos),
     }
 
+
+# ─── RANKING ──────────────────────────────────────────────────────────────────
 
 def _ranking(df: pd.DataFrame):
     rows = []
@@ -132,95 +151,204 @@ def _ranking(df: pd.DataFrame):
         pausa = d[d["estado"].isin(ESTADOS_PAUSA)]["minutos"].sum()
         fora  = d[d["estado"].isin(ESTADOS_FORA)]["minutos"].sum()
         total = prod + pausa + fora
-        if total == 0:
-            total = 1
-
+        pct   = round(prod / total * 100, 1) if total > 0 else 0.0
         rows.append({
-            "Agente":       ag,
-            "Produtivo":    prod,
-            "Pausa":        pausa,
-            "Fora":         fora,
-            "% Produtivo":  prod  / total * 100,
-            "% Pausa":      pausa / total * 100,
-            "% Fora":       fora  / total * 100,
+            "Agente": ag,
+            "Produtivo (min)": round(prod, 1),
+            "Pausa (min)":     round(pausa, 1),
+            "Fora (min)":      round(fora, 1),
+            "Total (min)":     round(total, 1),
+            "% Produtivo":     pct,
         })
 
-    df_rank = pd.DataFrame(rows)
-    df_rank = df_rank.sort_values("% Produtivo", ascending=False)
+    df_rank = pd.DataFrame(rows).sort_values("% Produtivo", ascending=False)
 
     fig = px.bar(
         df_rank,
         x="Agente",
         y="% Produtivo",
-        title="% de Tempo Produtivo por Agente (dia selecionado)",
         color="% Produtivo",
-        color_continuous_scale="Greens",
-        template="plotly_white",
+        color_continuous_scale="RdYlGn",
+        range_color=[0, 100],
+        text="% Produtivo",
+        title="% Tempo Produtivo por Agente",
+        template="plotly_white", # Força tema branco
     )
+    fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
     fig.update_layout(
-        xaxis_title="Agente",
-        yaxis_title="% Produtivo",
-        xaxis_tickangle=-45,
+        coloraxis_showscale=False,
         plot_bgcolor="#ffffff",
         paper_bgcolor="#ffffff",
         font=dict(color="#111111"),
+        yaxis_range=[0, 110],
         title_font=dict(color="#111111"),
+        xaxis_title_font=dict(color="#111111"),
+        yaxis_title_font=dict(color="#111111"),
         xaxis_tickfont=dict(color="#111111"),
         yaxis_tickfont=dict(color="#111111"),
     )
-
     return fig, df_rank
 
+
+# ─── ALERTAS ──────────────────────────────────────────────────────────────────
+
+def _alertas(df: pd.DataFrame, limite: int) -> pd.DataFrame:
+    rows = []
+    for ag in df["agente"].unique():
+        d = df[
+            (df["agente"] == ag) &
+            (df["estado"].isin(ESTADOS_PAUSA + ESTADOS_FORA))
+        ]
+        for _, r in d.iterrows():
+            if r.get("minutos", 0) >= limite:
+                rows.append({
+                    "Agente":        ag,
+                    "Status":        r["estado"],
+                    "Início":        r["inicio"].strftime("%H:%M"),
+                    "Fim":           r["fim"].strftime("%H:%M"),
+                    "Duração (min)": round(r["minutos"], 1),
+                })
+    return pd.DataFrame(rows)
+
+
+# ─── HISTÓRICO LINHA ──────────────────────────────────────────────────────────
+
+def _historico_linha(df_hist: pd.DataFrame) -> go.Figure | None:
+    if df_hist.empty:
+        return None
+
+    rows = []
+    for ag in df_hist["agente"].unique():
+        for dt in df_hist["data"].unique():
+            d = df_hist[(df_hist["agente"] == ag) & (df_hist["data"] == dt)]
+            prod  = d[d["estado"].isin(ESTADOS_PRODUTIVOS)]["minutos"].sum()
+            total = d["minutos"].sum()
+            pct   = round(prod / total * 100, 1) if total > 0 else 0.0
+            rows.append({"Agente": ag, "Data": dt, "% Produtivo": pct})
+
+    df_ev = pd.DataFrame(rows).sort_values("Data")
+    if df_ev.empty:
+        return None
+
+    fig = px.line(
+        df_ev, x="Data", y="% Produtivo",
+        color="Agente", markers=True,
+        title="Evolução Histórica – % Tempo Produtivo",
+        template="plotly_white", # Força tema branco
+    )
+    fig.add_hline(y=80, line_dash="dash", line_color="red",
+                  annotation_text="Meta 80%")
+    fig.update_layout(
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font=dict(color="#111111"),
+        yaxis_range=[0, 110],
+        title_font=dict(color="#111111"),
+        xaxis_title_font=dict(color="#111111"),
+        yaxis_title_font=dict(color="#111111"),
+        xaxis_tickfont=dict(color="#111111"),
+        yaxis_tickfont=dict(color="#111111"),
+        legend_font=dict(color="#111111"),
+    )
+    return fig
+
+
+# ─── RENDERIZAÇÃO DA ABA ──────────────────────────────────────────────────────
 
 def render(df_hist: pd.DataFrame, limite_alerta: int):
     st.header("📊 Dashboard de Status")
 
     if df_hist.empty:
-        st.info("Faça upload de ao menos um relatório para visualizar o dashboard.")
+        st.info("Faça o upload de um relatório na barra lateral para começar.")
         return
 
-    datas = sorted(df_hist["data"].unique())
-    data_sel = st.date_input(
-        "📅 Dia",
-        value=max(datas),
-        min_value=min(datas),
-        max_value=max(datas),
-        key="dash_data",
-    )
+    agentes_disp = get_agentes(df_hist)
+    datas        = sorted(df_hist["data"].unique(), reverse=True)
 
-    df_dia = df_hist[df_hist["data"] == data_sel].copy()
+    col_f1, col_f2 = st.columns([1, 3])
+    with col_f1:
+        data_sel = st.selectbox(
+            "📅 Data",
+            datas,
+            format_func=lambda d: (
+                d.strftime("%d/%m/%Y") if hasattr(d, "strftime") else str(d)
+            ),
+            key="dash_data_sel",
+        )
+    with col_f2:
+        agentes_sel = st.multiselect(
+            "👤 Agentes", agentes_disp, default=agentes_disp, key="dash_agentes_sel"
+        )
 
-    agentes_disp = get_agentes(df_dia)
-    agentes_sel = st.multiselect(
-        "👥 Agentes",
-        options=agentes_disp,
-        default=agentes_disp,
-        key="dash_agentes",
-    )
-
-    df_dia = df_dia[df_dia["agente"].isin(agentes_sel)]
+    df_dia = df_hist[
+        (df_hist["data"] == data_sel) &
+        (df_hist["agente"].isin(agentes_sel))
+    ].copy()
 
     if df_dia.empty:
-        st.warning("Nenhum dado para os filtros selecionados.")
+        st.warning("Sem dados para o dia e agentes selecionados.")
         return
 
-    # KPIs
-    k = kpis_dia(df_dia)
+    # ── KPIs ──────────────────────────────────────────────────────────────────
+    k = _kpis(df_dia)
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🟢 Produtivo", f"{k['pct_prod']:.1f}%", f"{k['prod_min']:.0f} min")
-    c2.metric("🟡 Pausa",     f"{k['pct_pausa']:.1f}%", f"{k['pausa_min']:.0f} min")
-    c3.metric("🔴 Fora",      f"{k['pct_fora']:.1f}%", f"{k['fora_min']:.0f} min")
+    c1.metric("🟢 Produtivo",      f"{k['pct_prod']:.1f}%",  f"{k['prod_min']:.0f} min")
+    c2.metric("🟡 Em Pausa",       f"{k['pct_pausa']:.1f}%", f"{k['pausa_min']:.0f} min")
+    c3.metric("🔴 Fora/Offline",   f"{k['pct_fora']:.1f}%",  f"{k['fora_min']:.0f} min")
     c4.metric("⏱️ Total Registrado", f"{k['total_min']:.0f} min")
 
     st.divider()
 
-    st.subheader("⏱️ Timeline por Agente")
+    # ── Gantt ─────────────────────────────────────────────────────────────────
+    st.subheader("📈 Timeline de Status")
     st.plotly_chart(_gantt(df_dia), use_container_width=True, key="dash_gantt")
 
     st.divider()
 
-    st.subheader("🏆 Ranking de Produtividade")
+    # ── Ranking ───────────────────────────────────────────────────────────────
+    st.subheader("🏆 Ranking de Aderência Produtiva")
     fig_rank, df_rank = _ranking(df_dia)
-    st.plotly_chart(fig_rank, use_container_width=True, key="dash_rank")
-    with st.expander("📋 Ver tabela"):
+    st.plotly_chart(fig_rank, use_container_width=True, key="dash_ranking")
+    with st.expander("📋 Ver tabela completa"):
         st.dataframe(df_rank, use_container_width=True)
+
+    st.divider()
+
+    # ── Alertas ───────────────────────────────────────────────────────────────
+    st.subheader(f"⚠️ Alertas: pausas/ausências ≥ {limite_alerta} min")
+    df_al = _alertas(df_dia, limite_alerta)
+    if df_al.empty:
+        st.success("Nenhuma pausa/ausência prolongada detectada.")
+    else:
+        st.warning(f"{len(df_al)} ocorrência(s) detectada(s).")
+        st.dataframe(df_al, use_container_width=True)
+
+    st.divider()
+
+    # ── Evolução histórica ────────────────────────────────────────────────────
+    st.subheader("📅 Evolução Histórica")
+    fig_hist = _historico_linha(df_hist)
+    if fig_hist:
+        st.plotly_chart(fig_hist, use_container_width=True, key="dash_historico")
+    else:
+        st.info("Suba mais dias para ver a evolução histórica.")
+
+    st.divider()
+
+    # ── Export ────────────────────────────────────────────────────────────────
+    st.subheader("💾 Exportar Dados")
+    c_e1, c_e2 = st.columns(2)
+    c_e1.download_button(
+        "⬇️ Dia selecionado (XLSX)",
+        data=_to_xlsx(df_dia),
+        file_name=f"status_{data_sel.strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dash_exp_dia",
+    )
+    c_e2.download_button(
+        "⬇️ Histórico completo (XLSX)",
+        data=_to_xlsx(df_hist),
+        file_name="historico_status_agentes.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dash_exp_hist",
+    )
