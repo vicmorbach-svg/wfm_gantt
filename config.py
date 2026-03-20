@@ -16,16 +16,15 @@ PALETA_STATUS = {
     "Transfers only":                "#27ae60",
 }
 
-ESTADOS_PRODUTIVOS = ["Online", "Transfers only"]
+ESTADOS_PRODUTIVOS = ["Online", "Transfers only", "Unified online"]
 ESTADOS_PAUSA = [
     "Away", "Descanso 1", "Descanso 2", "Almoço",
     "Lanche", "Pausa Pessoal", "Feedback",
-    "Categorização de atendimentos",
+    "Categorização de atendimentos","Unified away",
 ]
-ESTADOS_FORA    = ["Offline", "Disconnected"]
+ESTADOS_FORA    = ["Unified offline","Offline", "Disconnected"]
 ESTADOS_EXCLUIR = [
-    "Unified online", "Unified away",
-    "Unified offline", "Invisible",
+    "Invisible",
 ]
 
 DIAS_SEMANA_ORDEM = [
