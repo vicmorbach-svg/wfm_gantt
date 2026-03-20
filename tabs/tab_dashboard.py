@@ -8,7 +8,7 @@ from config import (
     PALETA_STATUS, ESTADOS_PRODUTIVOS,
     ESTADOS_PAUSA, ESTADOS_FORA,
 )
-from utils.data_loader import get_agentes
+from utils.data_loader import get_agentes # Importar get_agentes para usar no render
 
 # ─── CONSTANTES ───────────────────────────────────────────────────────────────
 
@@ -28,7 +28,7 @@ def _to_xlsx(df: pd.DataFrame) -> bytes:
 # ─── GANTT ────────────────────────────────────────────────────────────────────
 
 def _gantt(df: pd.DataFrame) -> go.Figure:
-    fig = go.Figure(layout=go.Layout(template="plotly_white"))
+    fig = go.Figure(layout=go.Layout(template="plotly_white")) # Inicializa com template branco
     agentes = sorted(df["agente"].unique(), reverse=True)
     estados_vis = set()
 
@@ -89,7 +89,7 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
             tickfont=dict(color="#111111"),
         ),
         yaxis=dict(
-            title=dict(text="", font=dict(color="#111111")),
+            title=dict(text="Agente", font=dict(color="#111111")),
             tickfont=dict(color="#111111"),
             automargin=True,
         ),
@@ -105,21 +105,20 @@ def _gantt(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-# ─── KPIS ─────────────────────────────────────────────────────────────────────
+# ─── KPIs ─────────────────────────────────────────────────────────────────────
 
 def _kpis(df: pd.DataFrame) -> dict:
-    # Agentes que tiveram algum status produtivo no dia
-    agentes_ativos = df[
-        df["estado"].isin(ESTADOS_PRODUTIVOS + ESTADOS_PAUSA + ESTADOS_FORA)
+    # Agentes que ficaram online em algum momento no dia
+    agentes_com_online = df[
+        df["estado"].isin(ESTADOS_PRODUTIVOS)
     ]["agente"].unique().tolist()
 
-    if not agentes_ativos:
-        return {
-            "prod_min": 0, "pausa_min": 0, "fora_min": 0, "total_min": 0,
-            "pct_prod": 0, "pct_pausa": 0, "pct_fora": 0, "n_agentes": 0,
-        }
-
-    df_base = df[df["agente"].isin(agentes_ativos)].copy()
+    if not agentes_com_online:
+        # Se ninguém ficou online, consideramos todos os agentes presentes no df
+        df_base = df.copy()
+    else:
+        # Filtra apenas agentes que tiveram algum status produtivo
+        df_base = df[df["agente"].isin(agentes_com_online)].copy()
 
     prod  = df_base[df_base["estado"].isin(ESTADOS_PRODUTIVOS)]["minutos"].sum()
     pausa = df_base[df_base["estado"].isin(ESTADOS_PAUSA)]["minutos"].sum()
@@ -137,7 +136,6 @@ def _kpis(df: pd.DataFrame) -> dict:
         "pct_prod":  prod  / total * 100,
         "pct_pausa": pausa / total * 100,
         "pct_fora":  fora  / total * 100,
-        "n_agentes": len(agentes_ativos),
     }
 
 
@@ -163,29 +161,28 @@ def _ranking(df: pd.DataFrame):
 
     df_rank = pd.DataFrame(rows).sort_values("% Produtivo", ascending=False)
 
-    fig = px.bar(
-        df_rank,
-        x="Agente",
-        y="% Produtivo",
-        color="% Produtivo",
-        color_continuous_scale="RdYlGn",
-        range_color=[0, 100],
-        text="% Produtivo",
-        title="% Tempo Produtivo por Agente",
-        template="plotly_white", # Força tema branco
-    )
-    fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+    fig = go.Figure(layout=go.Layout(template="plotly_white"))
+    fig.add_trace(go.Bar(
+        x=df_rank["Agente"],
+        y=df_rank["% Produtivo"],
+        marker_color=df_rank["% Produtivo"],
+        marker_colorscale="RdYlGn",
+        marker_cmin=0,
+        marker_cmax=100,
+        text=df_rank["% Produtivo"].apply(lambda x: f"{x:.1f}%"),
+        textposition="outside",
+    ))
     fig.update_layout(
-        coloraxis_showscale=False,
+        title=dict(text="% Tempo Produtivo por Agente", font=dict(color="#111111")),
         plot_bgcolor="#ffffff",
         paper_bgcolor="#ffffff",
-        font=dict(color="#111111"),
+        font=dict(color="#111111", size=12),
         yaxis_range=[0, 110],
-        title_font=dict(color="#111111"),
-        xaxis_title_font=dict(color="#111111"),
-        yaxis_title_font=dict(color="#111111"),
+        xaxis_title=dict(text="Agente", font=dict(color="#111111")),
+        yaxis_title=dict(text="% Produtivo", font=dict(color="#111111")),
         xaxis_tickfont=dict(color="#111111"),
         yaxis_tickfont=dict(color="#111111"),
+        showlegend=False,
     )
     return fig, df_rank
 
@@ -211,7 +208,7 @@ def _alertas(df: pd.DataFrame, limite: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ─── HISTÓRICO LINHA ──────────────────────────────────────────────────────────
+# ─── HISTÓRICO EM LINHA ───────────────────────────────────────────────────────
 
 def _historico_linha(df_hist: pd.DataFrame) -> go.Figure | None:
     if df_hist.empty:
@@ -234,26 +231,26 @@ def _historico_linha(df_hist: pd.DataFrame) -> go.Figure | None:
         df_ev, x="Data", y="% Produtivo",
         color="Agente", markers=True,
         title="Evolução Histórica – % Tempo Produtivo",
-        template="plotly_white", # Força tema branco
+        template="plotly_white",
     )
     fig.add_hline(y=80, line_dash="dash", line_color="red",
                   annotation_text="Meta 80%")
     fig.update_layout(
         plot_bgcolor="#ffffff",
         paper_bgcolor="#ffffff",
-        font=dict(color="#111111"),
+        font=dict(color="#111111", size=12),
         yaxis_range=[0, 110],
         title_font=dict(color="#111111"),
         xaxis_title_font=dict(color="#111111"),
         yaxis_title_font=dict(color="#111111"),
+        legend_font=dict(color="#111111"),
         xaxis_tickfont=dict(color="#111111"),
         yaxis_tickfont=dict(color="#111111"),
-        legend_font=dict(color="#111111"),
     )
     return fig
 
 
-# ─── RENDERIZAÇÃO DA ABA ──────────────────────────────────────────────────────
+# ─── RENDERIZAÇÃO DA ABA ───────────────────────────────────────────────────────
 
 def render(df_hist: pd.DataFrame, limite_alerta: int):
     st.header("📊 Dashboard de Status")
@@ -341,7 +338,7 @@ def render(df_hist: pd.DataFrame, limite_alerta: int):
     c_e1.download_button(
         "⬇️ Dia selecionado (XLSX)",
         data=_to_xlsx(df_dia),
-        file_name=f"status_{data_sel.strftime('%Y%m%d')}.xlsx",
+        file_name=f"status_{data_sel}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="dash_exp_dia",
     )
