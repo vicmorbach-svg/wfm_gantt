@@ -46,7 +46,6 @@ def processar_arquivo(arquivo) -> pd.DataFrame:
         df["minutos"] = (df["fim"] - df["inicio"]).dt.total_seconds() / 60
 
     # Remove estados Unified e similares
-    df = df[~df["estado"].str.startswith("Unified", na=False)]
     df = df[~df["estado"].isin(ESTADOS_EXCLUIR)]
 
     # Remove linhas sem início, sem agente ou sem estado
