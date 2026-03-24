@@ -1,298 +1,238 @@
 # tabs/tab_dashboard.py
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, time, timedelta
-from config import (
-    PALETA_STATUS,
-    ESTADOS_PRODUTIVOS,
-    ESTADOS_PAUSA,
-    ESTADOS_FORA,
-    DIAS_SEMANA_ORDEM,
-)
+from config import CORES_STATUS, DIAS_SEMANA_ORDEM, ESTADOS_INTERESSE
 
-# ─── CONSTANTES DE LAYOUT PARA GRÁFICOS ───────────────────────────────────────
-_TICK_VALS = [
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-    21, 22, 23, 24
-]
-_TICK_TEXT = [
-    "00h", "01h", "02h", "03h", "04h", "05h", "06h", "07h", "08h", "09h",
-    "10h", "11h", "12h", "13h", "14h", "15h", "16h", "17h", "18h", "19h",
-    "20h", "21h", "22h", "23h", "24h"
-]
+def _gantt_chart(df_filtrado: pd.DataFrame, agente_gantt: str, data_gantt: datetime):
+    if df_filtrado.empty:
+        st.warning("Nenhum dado disponível para exibir o Gantt.")
+        return go.Figure()
 
-# ─── FUNÇÕES AUXILIARES PARA GRÁFICOS ────────────────────────────────────────
-
-def _gantt_chart(df_hist: pd.DataFrame, agente_selecionado: str, data_selecionada: datetime.date):
-    df_agente_dia = df_hist[
-        (df_hist["agente"] == agente_selecionado)
-        & (df_hist["data"] == data_selecionada)
-    ].copy()
+    df_agente_dia = df_filtrado[(df_filtrado["agente"] == agente_gantt) & (df_filtrado["data"] == data_gantt.date())].copy()
 
     if df_agente_dia.empty:
-        return go.Figure().update_layout(
-            title=f"Nenhum dado para {agente_selecionado} em {data_selecionada.strftime('%d/%m/%Y')}",
-            plot_bgcolor="#ffffff",
-            paper_bgcolor="#ffffff",
-            font=dict(color="#111111"),
-        )
+        st.info(f"Nenhum dado de status para o agente {agente_gantt} no dia {data_gantt.strftime('%d/%m/%Y')}.")
+        return go.Figure()
 
-    # Ordenar por início para garantir a sequência correta
-    df_agente_dia = df_agente_dia.sort_values("inicio")
+    # Filtrar estados para incluir apenas os de interesse
+    df_agente_dia = df_agente_dia[df_agente_dia["estado"].isin(ESTADOS_INTERESSE)]
 
-    # Criar o gráfico de Gantt
     fig = px.timeline(
         df_agente_dia,
         x_start="inicio",
         x_end="fim",
-        y="estado", # Mostra os estados no eixo Y
+        y="agente",
         color="estado",
-        color_discrete_map=PALETA_STATUS,
-        title=f"Gantt de Status para {agente_selecionado} em {data_selecionada.strftime('%d/%m/%Y')}",
+        color_discrete_map=CORES_STATUS,
+        title=f"Gantt para {agente_gantt} em {data_gantt.strftime('%d/%m/%Y')}",
+        hover_name="estado",
+        hover_data={
+            "inicio": "|%H:%M:%S",
+            "fim": "|%H:%M:%S",
+            "minutos": True,
+            "estado": False,
+        }
     )
 
-    fig.update_yaxes(
-        categoryorder="array",
-        categoryarray=sorted(df_agente_dia["estado"].unique()),
-        tickfont=dict(color="#111111"),
-        title=dict(text="Estado", font=dict(color="#111111")),
-    )
+    fig.update_yaxes(autorange="reversed") # Para exibir o agente de cima para baixo
 
+    # Definir o range do eixo X para cobrir 24 horas do dia selecionado
+    start_of_day = datetime(data_gantt.year, data_gantt.month, data_gantt.day, 0, 0, 0)
+    end_of_day = start_of_day + timedelta(days=1)
     fig.update_xaxes(
-        tickvals=[
-            datetime(data_selecionada.year, data_selecionada.month, data_selecionada.day, h)
-            for h in _TICK_VALS
-        ],
-        ticktext=_TICK_TEXT,
-        range=[
-            datetime(data_selecionada.year, data_selecionada.month, data_selecionada.day, 0, 0, 0),
-            datetime(data_selecionada.year, data_selecionada.month, data_selecionada.day, 23, 59, 59) + timedelta(seconds=1)
-        ],
-        tickformat="%Hh",
-        showgrid=True,
-        gridcolor="#e0e0e0",
-        tickfont=dict(color="#111111"),
-        title=dict(text="Hora do Dia", font=dict(color="#111111")),
+        range=[start_of_day, end_of_day],
+        tickformat="%H:%M",
+        dtick=3600000, # Um tick a cada hora
+        title="Hora do Dia"
     )
 
     fig.update_layout(
-        hovermode="x unified",
-        xaxis_title="Hora do Dia",
-        yaxis_title="Estado",
-        template="plotly_white",
-        plot_bgcolor="#ffffff",
-        paper_bgcolor="#ffffff",
-        font=dict(color="#111111"),
-        legend_title_text="Status",
+        barmode="overlay",
+        xaxis_showgrid=True,
+        yaxis_showgrid=True,
+        xaxis_tickangle=-45,
+        height=200,
+        margin=dict(l=140, r=20, t=60, b=50),
+        plot_bgcolor="white", # Fundo branco
+        paper_bgcolor="white", # Fundo do papel branco
+        font=dict(color="black"), # Cor da fonte preta
     )
+
+    # Adicionar linhas verticais para cada hora
+    for h in range(0, 24):
+        fig.add_vline(
+            x=datetime(data_gantt.year, data_gantt.month, data_gantt.day, h),
+            line_width=0.5,
+            line_dash="dot",
+            line_color="gray"
+        )
 
     return fig
 
-def _ranking_status(df_hist: pd.DataFrame, tipo_status: str):
-    df_filtrado = df_hist[df_hist["estado"].isin(tipo_status)].copy()
-    df_ranking = (
-        df_filtrado.groupby("agente")["minutos"].sum().reset_index()
-    )
-    df_ranking["horas"] = df_ranking["minutos"] / 60
-    df_ranking = df_ranking.sort_values("horas", ascending=False)
+def _total_minutos_por_estado(df: pd.DataFrame):
+    if df.empty:
+        return pd.DataFrame()
 
-    fig = px.bar(
-        df_ranking,
-        x="agente",
-        y="horas",
-        title=f"Ranking de Agentes por Tempo em Status {tipo_status[0].split(' ')[0]}",
-        labels={"agente": "Agente", "horas": "Horas"},
-        color_discrete_sequence=px.colors.qualitative.Pastel,
-    )
-    fig.update_layout(
-        xaxis_title="Agente",
-        yaxis_title="Horas",
-        template="plotly_white",
-        plot_bgcolor="#ffffff",
-        paper_bgcolor="#ffffff",
-        font=dict(color="#111111"),
-        xaxis=dict(tickfont=dict(color="#111111"), titlefont=dict(color="#111111")),
-        yaxis=dict(tickfont=dict(color="#111111"), titlefont=dict(color="#111111")),
-    )
-    return fig
+    # Filtrar estados para incluir apenas os de interesse
+    df_filtered = df[df["estado"].isin(ESTADOS_INTERESSE)]
 
-def _historico_diario(df_hist: pd.DataFrame, agente_selecionado: str):
-    df_agente = df_hist[df_hist["agente"] == agente_selecionado].copy()
-    df_agente["data"] = pd.to_datetime(df_agente["data"]) # Garante que 'data' é datetime
+    total_por_estado = df_filtered.groupby("estado")["minutos"].sum().reset_index()
+    total_por_estado.columns = ["Estado", "Total Minutos"]
+    return total_por_estado
 
-    df_resumo_diario = (
-        df_agente.groupby(["data", "estado"])["minutos"].sum().unstack(fill_value=0)
-    )
-    df_resumo_diario = df_resumo_diario.reindex(
-        columns=list(PALETA_STATUS.keys()), fill_value=0
-    ) # Garante todas as colunas de status
+def _minutos_por_agente_e_estado(df: pd.DataFrame):
+    if df.empty:
+        return pd.DataFrame()
 
-    df_resumo_diario["Total"] = df_resumo_diario.sum(axis=1)
-    df_resumo_diario = df_resumo_diario.stack().reset_index(name="minutos")
-    df_resumo_diario = df_resumo_diario.rename(columns={"level_0": "data", "level_1": "estado"})
-    df_resumo_diario["horas"] = df_resumo_diario["minutos"] / 60
+    # Filtrar estados para incluir apenas os de interesse
+    df_filtered = df[df["estado"].isin(ESTADOS_INTERESSE)]
+
+    minutos_agente_estado = df_filtered.groupby(["agente", "estado"])["minutos"].sum().unstack(fill_value=0)
+    minutos_agente_estado["Total"] = minutos_agente_estado.sum(axis=1)
+    minutos_agente_estado = minutos_agente_estado.sort_values("Total", ascending=False).drop("Total", axis=1)
+    return minutos_agente_estado
+
+def _total_minutos_por_dia_semana(df: pd.DataFrame):
+    if df.empty:
+        return pd.DataFrame()
+
+    # Filtrar estados para incluir apenas os de interesse
+    df_filtered = df[df["estado"].isin(ESTADOS_INTERESSE)]
+
+    total_por_dia = df_filtered.groupby("dia_semana")["minutos"].sum().reset_index()
+    total_por_dia.columns = ["Dia da Semana", "Total Minutos"]
+    return total_por_dia
+
+def _distribuicao_estados_ao_longo_do_dia(df: pd.DataFrame):
+    if df.empty:
+        return go.Figure()
+
+    # Filtrar estados para incluir apenas os de interesse
+    df_filtered = df[df["estado"].isin(ESTADOS_INTERESSE)]
+
+    df_filtered["hora"] = df_filtered["inicio"].dt.hour
+    distribuicao = df_filtered.groupby(["hora", "estado"])["minutos"].sum().unstack(fill_value=0)
 
     fig = px.area(
-        df_resumo_diario,
-        x="data",
-        y="horas",
-        color="estado",
-        title=f"Histórico Diário de Status para {agente_selecionado}",
-        labels={"data": "Data", "horas": "Horas", "estado": "Estado"},
-        color_discrete_map=PALETA_STATUS,
+        distribuicao,
+        x=distribuicao.index,
+        y=distribuicao.columns,
+        title="Distribuição de Estados ao Longo do Dia",
+        labels={"x": "Hora do Dia", "value": "Minutos", "estado": "Estado"},
+        color_discrete_map=CORES_STATUS
     )
     fig.update_layout(
-        xaxis_title="Data",
-        yaxis_title="Horas",
-        template="plotly_white",
-        plot_bgcolor="#ffffff",
-        paper_bgcolor="#ffffff",
-        font=dict(color="#111111"),
-        xaxis=dict(tickfont=dict(color="#111111"), titlefont=dict(color="#111111")),
-        yaxis=dict(tickfont=dict(color="#111111"), titlefont=dict(color="#111111")),
+        xaxis_title="Hora do Dia",
+        yaxis_title="Total de Minutos",
+        hovermode="x unified",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        font=dict(color="black"),
     )
     return fig
 
-# ─── FUNÇÃO PARA EXPORTAR DATAFRAME PARA XLSX ────────────────────────────────
-
-def df_to_xlsx(df: pd.DataFrame) -> bytes:
-    output = pd.ExcelWriter("temp.xlsx", engine="xlsxwriter")
-    df.to_excel(output, index=False, sheet_name="Dados")
-    output.close()
-    with open("temp.xlsx", "rb") as f:
-        excel_data = f.read()
-    return excel_data
-
-# ─── RENDERIZAÇÃO DA ABA DASHBOARD ───────────────────────────────────────────
-
 def render(df_hist: pd.DataFrame, limite_alerta: int):
-    st.title("📊 Dashboard de Monitoramento")
+    st.subheader("Dashboard Geral")
 
     if df_hist.empty:
-        st.info("Por favor, suba um arquivo de histórico de status na barra lateral.")
+        st.info("Por favor, carregue um arquivo para visualizar o dashboard.")
         return
 
-    # ── Filtros Globais ──────────────────────────────────────────────────────
-    st.sidebar.subheader("⚙️ Filtros do Dashboard")
-    agentes_unicos = sorted(df_hist["agente"].unique().tolist())
-    agentes_selecionados = st.sidebar.multiselect(
-        "Agentes", agentes_unicos, default=agentes_unicos, key="dash_agentes_filtro"
-    )
+    # Filtrar df_hist para incluir apenas os estados de interesse
+    df_hist_filtered = df_hist[df_hist["estado"].isin(ESTADOS_INTERESSE)].copy()
 
-    datas_unicas = sorted(df_hist["data"].unique().tolist(), reverse=True)
-    datas_selecionadas = st.sidebar.multiselect(
-        "Datas",
-        datas_unicas,
-        default=datas_unicas[:7], # Seleciona as últimas 7 datas por padrão
-        format_func=lambda d: d.strftime("%d/%m/%Y"),
-        key="dash_datas_filtro",
-    )
-
-    df_filtrado = df_hist[
-        (df_hist["agente"].isin(agentes_selecionados))
-        & (df_hist["data"].isin(datas_selecionadas))
-    ].copy()
-
-    if df_filtrado.empty:
-        st.warning("Nenhum dado encontrado com os filtros selecionados.")
+    if df_hist_filtered.empty:
+        st.warning("Nenhum dado disponível para os estados de interesse selecionados.")
         return
 
-    # ── KPIs ──────────────────────────────────────────────────────────────────
-    total_minutos = df_filtrado["minutos"].sum()
-    total_horas = total_minutos / 60
+    # Visão Geral dos Agentes
+    st.markdown("### Visão Geral por Agente")
+    minutos_agente_estado = _minutos_por_agente_e_estado(df_hist_filtered)
+    if not minutos_agente_estado.empty:
+        st.dataframe(minutos_agente_estado, use_container_width=True)
+    else:
+        st.info("Nenhum dado de minutos por agente e estado disponível.")
 
-    minutos_produtivos = df_filtrado[df_filtrado["estado"].isin(ESTADOS_PRODUTIVOS)]["minutos"].sum()
-    horas_produtivas = minutos_produtivos / 60
-    perc_produtivo = (minutos_produtivos / total_minutos * 100) if total_minutos > 0 else 0
-
-    minutos_pausa = df_filtrado[df_filtrado["estado"].isin(ESTADOS_PAUSA)]["minutos"].sum()
-    horas_pausa = minutos_pausa / 60
-    perc_pausa = (minutos_pausa / total_minutos * 100) if total_minutos > 0 else 0
-
-    minutos_fora = df_filtrado[df_filtrado["estado"].isin(ESTADOS_FORA)]["minutos"].sum()
-    horas_fora = minutos_fora / 60
-    perc_fora = (minutos_fora / total_minutos * 100) if total_minutos > 0 else 0
-
-    st.subheader("Sumário Geral")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Registrado", f"{total_horas:.1f}h")
-    col2.metric("Produtivo", f"{horas_produtivas:.1f}h ({perc_produtivo:.1f}%)")
-    col3.metric("Pausa", f"{horas_pausa:.1f}h ({perc_pausa:.1f}%)")
-    col4.metric("Fora/Offline", f"{horas_fora:.1f}h ({perc_fora:.1f}%)")
-
-    st.divider()
-
-    # ── Gráfico de Gantt ──────────────────────────────────────────────────────
-    st.subheader("Gantt de Status por Agente e Dia")
-    col_g1, col_g2 = st.columns(2)
-    with col_g1:
-        agente_gantt = st.selectbox(
-            "Selecione um agente",
-            agentes_selecionados,
-            key="dash_gantt_agente",
+    # Total de Minutos por Estado
+    st.markdown("### Total de Minutos por Estado")
+    total_por_estado = _total_minutos_por_estado(df_hist_filtered)
+    if not total_por_estado.empty:
+        fig_total_estado = px.bar(
+            total_por_estado,
+            x="Estado",
+            y="Total Minutos",
+            title="Total de Minutos por Estado",
+            color="Estado",
+            color_discrete_map=CORES_STATUS
         )
-    with col_g2:
-        datas_agente = sorted(
-            df_filtrado[df_filtrado["agente"] == agente_gantt]["data"].unique(),
-            reverse=True,
+        fig_total_estado.update_layout(
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            font=dict(color="black"),
         )
-        if datas_agente:
-            data_gantt = st.selectbox(
-                "Selecione a data",
-                datas_agente,
-                format_func=lambda d: pd.to_datetime(d).strftime("%d/%m/%Y"),
-                key="dash_gantt_data",
-            )
+        st.plotly_chart(fig_total_estado, use_container_width=True)
+    else:
+        st.info("Nenhum dado de total de minutos por estado disponível.")
+
+    # Total de Minutos por Dia da Semana
+    st.markdown("### Total de Minutos por Dia da Semana")
+    total_por_dia_semana = _total_minutos_por_dia_semana(df_hist_filtered)
+    if not total_por_dia_semana.empty:
+        fig_total_dia = px.bar(
+            total_por_dia_semana,
+            x="Dia da Semana",
+            y="Total Minutos",
+            title="Total de Minutos por Dia da Semana",
+            color="Dia da Semana",
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+        fig_total_dia.update_layout(
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            font=dict(color="black"),
+        )
+        st.plotly_chart(fig_total_dia, use_container_width=True)
+    else:
+        st.info("Nenhum dado de total de minutos por dia da semana disponível.")
+
+    # Distribuição de Estados ao Longo do Dia
+    st.markdown("### Distribuição de Estados ao Longo do Dia")
+    fig_dist_dia = _distribuicao_estados_ao_longo_do_dia(df_hist_filtered)
+    st.plotly_chart(fig_dist_dia, use_container_width=True)
+
+    # Gantt Chart para um Agente Específico
+    st.markdown("### Gantt Chart Detalhado")
+    agentes = sorted(df_hist_filtered["agente"].unique())
+    if agentes:
+        col_gantt1, col_gantt2 = st.columns(2)
+        with col_gantt1:
+            agente_gantt = st.selectbox("Selecione o Agente para Gantt", agentes)
+        with col_gantt2:
+            datas_disponiveis = sorted(df_hist_filtered[df_hist_filtered["agente"] == agente_gantt]["data"].unique())
+            if datas_disponiveis:
+                data_gantt = st.selectbox("Selecione a Data para Gantt", datas_disponiveis)
+            else:
+                data_gantt = None
+                st.warning(f"Nenhuma data disponível para o agente {agente_gantt}.")
+
+        if agente_gantt and data_gantt:
+            fig_gantt = _gantt_chart(df_hist_filtered, agente_gantt, datetime.combine(data_gantt, time.min))
+            st.plotly_chart(fig_gantt, use_container_width=True)
+    else:
+        st.info("Nenhum agente disponível para o Gantt Chart.")
+
+    # Alertas de Tempo em "Away"
+    st.markdown("### Alertas de Tempo em 'Unified away'")
+    df_away = df_hist_filtered[df_hist_filtered["estado"] == "Unified away"].copy()
+    if not df_away.empty:
+        df_away_longo = df_away[df_away["minutos"] > limite_alerta]
+        if not df_away_longo.empty:
+            st.warning(f"Os seguintes agentes estiveram em 'Unified away' por mais de {limite_alerta} minutos:")
+            st.dataframe(df_away_longo[["agente", "data", "inicio", "fim", "minutos"]].sort_values(by="minutos", ascending=False), use_container_width=True)
         else:
-            data_gantt = None
-            st.info("Selecione um agente com dados para ver o Gantt.")
-
-    if agente_gantt and data_gantt:
-        fig_gantt = _gantt_chart(df_filtrado, agente_gantt, data_gantt)
-        st.plotly_chart(fig_gantt, use_container_width=True, key="dash_fig_gantt")
+            st.info(f"Nenhum agente esteve em 'Unified away' por mais de {limite_alerta} minutos.")
     else:
-        st.info("Selecione um agente e uma data para visualizar o Gantt.")
-
-    st.divider()
-
-    # ── Ranking de Status Produtivo ───────────────────────────────────────────
-    st.subheader("Ranking de Tempo Produtivo")
-    fig_rank_prod = _ranking_status(df_filtrado, ESTADOS_PRODUTIVOS)
-    st.plotly_chart(fig_rank_prod, use_container_width=True, key="dash_fig_rank_prod")
-
-    st.divider()
-
-    # ── Ranking de Status de Pausa ────────────────────────────────────────────
-    st.subheader("Ranking de Tempo em Pausa")
-    fig_rank_pausa = _ranking_status(df_filtrado, ESTADOS_PAUSA)
-    st.plotly_chart(fig_rank_pausa, use_container_width=True, key="dash_fig_rank_pausa")
-
-    st.divider()
-
-    # ── Histórico Diário de Status ────────────────────────────────────────────
-    st.subheader("Histórico Diário de Status por Agente")
-    agente_hist = st.selectbox(
-        "Selecione um agente para o histórico",
-        agentes_selecionados,
-        key="dash_hist_agente",
-    )
-    if agente_hist:
-        fig_hist = _historico_diario(df_filtrado, agente_hist)
-        st.plotly_chart(fig_hist, use_container_width=True, key="dash_fig_hist")
-    else:
-        st.info("Selecione um agente para visualizar o histórico diário.")
-
-    st.divider()
-
-    # ── Export ────────────────────────────────────────────────────────────────
-    st.subheader("💾 Exportar Dados Filtrados")
-    st.download_button(
-        "⬇️ Exportar Dados do Dashboard (XLSX)",
-        data=df_to_xlsx(df_filtrado),
-        file_name="dashboard_dados_filtrados.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="dash_exp_filtrados",
-    )
+        st.info("Nenhum registro de 'Unified away' encontrado.")
