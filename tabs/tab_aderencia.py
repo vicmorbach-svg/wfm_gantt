@@ -1,161 +1,207 @@
-# tabs/tab_aderencia.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, time, timedelta
-from config import CORES_STATUS, DIAS_SEMANA_ORDEM, ESTADOS_INTERESSE
+from config import CORES_STATUS, ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_IMPRODUTIVOS, DIAS_SEMANA_ORDEM
 
-def _gantt_aderencia(df_hist: pd.DataFrame, df_escala: pd.DataFrame, agente_gantt: str, dt_gantt: datetime):
-    if df_hist.empty:
-        st.warning("Nenhum dado histórico disponível para exibir o Gantt de aderência.")
-        return go.Figure()
-
-    df_agente_dia = df_hist[(df_hist["agente"] == agente_gantt) & (df_hist["data"] == dt_gantt.date())].copy()
-
+def _gantt_aderencia(df_agente_dia: pd.DataFrame, df_escala_agente_dia: pd.DataFrame, agente_gantt: str, data_gantt: datetime):
     if df_agente_dia.empty:
-        st.info(f"Nenhum dado de status para o agente {agente_gantt} no dia {dt_gantt.strftime('%d/%m/%Y')}.")
+        st.warning(f"Não há dados para o agente {agente_gantt} no dia {data_gantt.strftime('%d/%m/%Y')}.")
         return go.Figure()
 
-    # Filtrar estados para incluir apenas os de interesse
-    df_agente_dia = df_agente_dia[df_agente_dia["estado"].isin(ESTADOS_INTERESSE)]
+    # Filtrar para o agente e dia selecionados
+    df_gantt = df_agente_dia[
+        (df_agente_dia["agente"] == agente_gantt) &
+        (df_agente_dia["inicio"].dt.date == data_gantt.date())
+    ].copy()
+
+    if df_gantt.empty:
+        st.warning(f"Não há dados para o agente {agente_gantt} no dia {data_gantt.strftime('%d/%m/%Y')}.")
+        return go.Figure()
+
+    # Garantir que as colunas de tempo são datetime
+    df_gantt["inicio"] = pd.to_datetime(df_gantt["inicio"])
+    df_gantt["fim"] = pd.to_datetime(df_gantt["fim"])
+
+    # Ordenar por início para garantir a sequência correta
+    df_gantt = df_gantt.sort_values(by="inicio").reset_index(drop=True)
 
     # Criar o gráfico de Gantt
     fig = px.timeline(
-        df_agente_dia,
+        df_gantt,
         x_start="inicio",
         x_end="fim",
         y="agente",
         color="estado",
         color_discrete_map=CORES_STATUS,
-        title=f"Gantt de Aderência para {agente_gantt} em {dt_gantt.strftime('%d/%m/%Y')}",
-        hover_name="estado",
-        hover_data={
-            "inicio": "|%H:%M:%S",
-            "fim": "|%H:%M:%S",
-            "minutos": True,
-            "estado": False,
-        }
+        title=f"Linha do Tempo do Agente: {agente_gantt} em {data_gantt.strftime('%d/%m/%Y')}"
     )
 
-    fig.update_yaxes(autorange="reversed") # Para exibir o agente de cima para baixo
+    # Adicionar a barra de escala
+    escala_dia = df_escala_agente_dia[
+        (df_escala_agente_dia["agente"] == agente_gantt) &
+        (df_escala_agente_dia["data"].dt.date == data_gantt.date())
+    ]
 
-    # Definir o range do eixo X para cobrir 24 horas do dia selecionado
-    start_of_day = datetime(dt_gantt.year, dt_gantt.month, dt_gantt.day, 0, 0, 0)
-    end_of_day = start_of_day + timedelta(days=1)
-    fig.update_xaxes(
-        range=[start_of_day, end_of_day],
-        tickformat="%H:%M",
-        dtick=3600000, # Um tick a cada hora
-        title="Hora do Dia"
-    )
+    if not escala_dia.empty:
+        escala_inicio = datetime.combine(data_gantt.date(), escala_dia["hora_inicio_escala"].iloc[0])
+        escala_fim = datetime.combine(data_gantt.date(), escala_dia["hora_fim_escala"].iloc[0])
 
+        fig.add_trace(go.Scatter(
+            x=[escala_inicio, escala_fim],
+            y=[agente_gantt, agente_gantt],
+            mode='lines',
+            line=dict(color='blue', width=4, dash='dot'),
+            name='Escala Prevista',
+            hoverinfo='text',
+            text=[f"Escala: {escala_inicio.strftime('%H:%M')} - {escala_fim.strftime('%H:%M')}",
+                  f"Escala: {escala_inicio.strftime('%H:%M')} - {escala_fim.strftime('%H:%M')}"]
+        ))
+
+    # Ajustar o layout do gráfico
     fig.update_layout(
+        xaxis_title="Hora do Dia",
+        yaxis_title="Agente",
+        hovermode="x unified",
         barmode="overlay",
-        xaxis_showgrid=True,
-        yaxis_showgrid=True,
-        xaxis_tickangle=-45,
         height=200,
         margin=dict(l=140, r=20, t=60, b=50),
-        plot_bgcolor="white", # Fundo branco
-        paper_bgcolor="white", # Fundo do papel branco
-        font=dict(color="black"), # Cor da fonte preta
+        xaxis=dict(
+            tickformat="%H:%M",
+            dtick="H1", # Tick a cada hora
+            range=[
+                datetime(data_gantt.year, data_gantt.month, data_gantt.day, 0, 0, 0),
+                datetime(data_gantt.year, data_gantt.month, data_gantt.day, 23, 59, 59)
+            ]
+        )
     )
 
-    # Adicionar linhas verticais para cada hora
-    for h in range(0, 24):
+    # Adicionar linhas verticais para cada hora do dia
+    for h in range(24):
         fig.add_vline(
-            x=datetime(dt_gantt.year, dt_gantt.month, dt_gantt.day, h),
+            x=datetime(data_gantt.year, data_gantt.month, data_gantt.day, h, 0, 0).timestamp() * 1000,
             line_width=0.5,
             line_dash="dot",
-            line_color="gray"
+            line_color="gray",
+            annotation_text=f"{h:02d}:00",
+            annotation_position="top right",
+            annotation_font_size=10,
+            annotation_font_color="gray"
         )
 
-    # Adicionar a escala do agente (se houver)
-    if not df_escala.empty:
-        escala_agente_dia = df_escala[(df_escala["agente"] == agente_gantt) & (df_escala["data"] == dt_gantt.date())].copy()
-        if not escala_agente_dia.empty:
-            for _, row in escala_agente_dia.iterrows():
-                fig.add_shape(
-                    type="rect",
-                    x0=row["inicio_escala"],
-                    y0=-0.5, # Ajuste para cobrir a barra do agente
-                    x1=row["fim_escala"],
-                    y1=0.5,  # Ajuste para cobrir a barra do agente
-                    fillcolor="rgba(0, 128, 0, 0.2)", # Verde claro transparente
-                    line_width=0,
-                    layer="below"
-                )
-                fig.add_annotation(
-                    x=row["inicio_escala"] + (row["fim_escala"] - row["inicio_escala"]) / 2,
-                    y=0.5, # Posição da anotação
-                    text="Escala",
-                    showarrow=False,
-                    font=dict(color="darkgreen", size=10),
-                    yanchor="bottom"
-                )
-
+    fig.update_yaxes(autorange="reversed")
     return fig
 
-def _resumo_aderencia(df_hist: pd.DataFrame, df_escala: pd.DataFrame, agente_gantt: str, dt_gantt: datetime):
-    if df_hist.empty:
-        st.warning("Nenhum dado histórico disponível para exibir o resumo de aderência.")
+def _calcular_metricas_aderencia(df_filtrado: pd.DataFrame, df_escala: pd.DataFrame):
+    if df_filtrado.empty:
         return pd.DataFrame()
 
-    df_agente_dia = df_hist[(df_hist["agente"] == agente_gantt) & (df_hist["data"] == dt_gantt.date())].copy()
+    # Garantir que 'inicio' é datetime e extrair a data
+    df_filtrado['data'] = df_filtrado['inicio'].dt.normalize()
 
-    if df_agente_dia.empty:
-        st.info(f"Nenhum dado de status para o agente {agente_gantt} no dia {dt_gantt.strftime('%d/%m/%Y')}.")
-        return pd.DataFrame()
+    # Calcular tempo total em cada estado por agente por dia
+    df_sum = df_filtrado.groupby(["agente", "data", "estado"])["minutos"].sum().reset_index()
 
-    # Filtrar estados para incluir apenas os de interesse
-    df_agente_dia = df_agente_dia[df_agente_dia["estado"].isin(ESTADOS_INTERESSE)]
+    # Pivotar para ter estados como colunas
+    df_pivot = df_sum.pivot_table(index=["agente", "data"], columns="estado", values="minutos", fill_value=0).reset_index()
 
-    resumo = df_agente_dia.groupby("estado")["minutos"].sum().reset_index()
-    resumo.columns = ["Estado", "Tempo Total (minutos)"]
+    # Calcular tempo produtivo, pausa e improdutivo
+    df_pivot["Tempo Produtivo (min)"] = df_pivot[[col for col in ESTADOS_PRODUTIVOS if col in df_pivot.columns]].sum(axis=1)
+    df_pivot["Tempo em Pausa (min)"] = df_pivot[[col for col in ESTADOS_PAUSA if col in df_pivot.columns]].sum(axis=1)
+    df_pivot["Tempo Improdutivo (min)"] = df_pivot[[col for col in ESTADOS_IMPRODUTIVOS if col in df_pivot.columns]].sum(axis=1)
 
-    # Adicionar a escala do agente ao resumo
-    if not df_escala.empty:
-        escala_agente_dia = df_escala[(df_escala["agente"] == agente_gantt) & (df_escala["data"] == dt_gantt.date())].copy()
-        if not escala_agente_dia.empty:
-            total_escala_min = (escala_agente_dia["fim_escala"] - escala_agente_dia["inicio_escala"]).dt.total_seconds().sum() / 60
-            resumo = pd.concat([resumo, pd.DataFrame([{"Estado": "Tempo em Escala", "Tempo Total (minutos)": total_escala_min}])], ignore_index=True)
+    # Merge com a escala para obter as horas de trabalho esperadas
+    df_metricas = pd.merge(df_pivot, df_escala, on=["agente", "data"], how="left")
 
-    return resumo
+    # Calcular duração da escala em minutos
+    df_metricas['inicio_escala_dt'] = df_metricas.apply(lambda row: datetime.combine(row['data'], row['hora_inicio_escala']), axis=1)
+    df_metricas['fim_escala_dt'] = df_metricas.apply(lambda row: datetime.combine(row['data'], row['hora_fim_escala']), axis=1)
+    df_metricas["Duracao Escala (min)"] = (df_metricas["fim_escala_dt"] - df_metricas["inicio_escala_dt"]).dt.total_seconds() / 60
+
+    # Calcular aderência
+    df_metricas["Aderência (%)"] = (
+        (df_metricas["Tempo Produtivo (min)"] + df_metricas["Tempo em Pausa (min)"]) / df_metricas["Duracao Escala (min)"]
+    ) * 100
+    df_metricas["Aderência (%)"] = df_metricas["Aderência (%)"].fillna(0).round(2)
+
+    # Calcular Ociosidade
+    df_metricas["Ociosidade (%)"] = (df_metricas["Tempo Improdutivo (min)"] / df_metricas["Duracao Escala (min)"]) * 100
+    df_metricas["Ociosidade (%)"] = df_metricas["Ociosidade (%)"].fillna(0).round(2)
+
+    return df_metricas.sort_values(by=["data", "agente"])
 
 def render(df_hist: pd.DataFrame, df_escala: pd.DataFrame):
-    st.subheader("Aderência do Agente")
+    st.title("Relatório de Aderência Detalhada")
 
-    if df_hist.empty:
-        st.info("Por favor, carregue um arquivo para visualizar a aderência.")
-        return
-
-    agentes = sorted(df_hist["agente"].unique())
-    if not agentes:
-        st.warning("Nenhum agente encontrado nos dados.")
-        return
+    # Filtros de data para a aderência
+    min_date = df_hist["inicio"].min().date() if not df_hist.empty else datetime.now().date()
+    max_date = df_hist["inicio"].max().date() if not df_hist.empty else datetime.now().date()
 
     col1, col2 = st.columns(2)
     with col1:
-        agente_selecionado = st.selectbox("Selecione o Agente", agentes)
+        data_inicio_aderencia = st.date_input("Data de Início:", min_value=min_date, max_value=max_date, value=min_date)
     with col2:
-        datas_disponiveis = sorted(df_hist[df_hist["agente"] == agente_selecionado]["data"].unique())
+        data_fim_aderencia = st.date_input("Data de Fim:", min_value=min_date, max_value=max_date, value=max_date)
+
+    # Converter para datetime para comparação
+    data_inicio_aderencia_dt = datetime.combine(data_inicio_aderencia, time.min)
+    data_fim_aderencia_dt = datetime.combine(data_fim_aderencia, time.max)
+
+    df_filtrado_aderencia = df_hist[
+        (df_hist["inicio"] >= data_inicio_aderencia_dt) &
+        (df_hist["inicio"] <= data_fim_aderencia_dt)
+    ]
+
+    if df_filtrado_aderencia.empty:
+        st.warning("Não há dados para o período selecionado na Aderência.")
+        return
+
+    # Calcular métricas de aderência
+    df_metricas_aderencia = _calcular_metricas_aderencia(df_filtrado_aderencia, df_escala)
+
+    if df_metricas_aderencia.empty:
+        st.warning("Não foi possível calcular as métricas de aderência para o período selecionado.")
+        return
+
+    st.subheader("Aderência Diária por Agente")
+    st.dataframe(df_metricas_aderencia[[
+        "agente", "data", "Duracao Escala (min)", "Tempo Produtivo (min)",
+        "Tempo em Pausa (min)", "Tempo Improdutivo (min)", "Aderência (%)", "Ociosidade (%)"
+    ]].set_index(["agente", "data"]))
+
+    # Gráfico de Aderência por Agente ao longo do tempo
+    st.subheader("Aderência por Agente ao Longo do Tempo")
+    fig_aderencia_tempo = px.line(
+        df_metricas_aderencia,
+        x="data",
+        y="Aderência (%)",
+        color="agente",
+        title="Aderência Diária por Agente",
+        labels={"data": "Data", "Aderência (%)": "Aderência (%)", "agente": "Agente"},
+        hover_data={"Tempo Produtivo (min)": ":.2f", "Tempo em Pausa (min)": ":.2f", "Tempo Improdutivo (min)": ":.2f"}
+    )
+    fig_aderencia_tempo.update_layout(hovermode="x unified")
+    st.plotly_chart(fig_aderencia_tempo, use_container_width=True)
+
+    # Gráfico de Gantt para um agente e dia específicos
+    st.subheader("Visualização Detalhada (Gráfico de Gantt)")
+
+    agentes_disponiveis = df_filtrado_aderencia["agente"].unique().tolist()
+    if not agentes_disponiveis:
+        st.warning("Nenhum agente disponível para o Gantt no período selecionado.")
+        return
+
+    col_gantt1, col_gantt2 = st.columns(2)
+    with col_gantt1:
+        agente_gantt = st.selectbox("Selecione o Agente para o Gantt (Aderência):", agentes_disponiveis)
+    with col_gantt2:
+        datas_disponiveis = sorted(df_filtrado_aderencia[df_filtrado_aderencia["agente"] == agente_gantt]["inicio"].dt.date.unique().tolist())
         if not datas_disponiveis:
-            st.warning(f"Nenhuma data disponível para o agente {agente_selecionado}.")
+            st.warning(f"Nenhuma data disponível para o agente {agente_gantt}.")
             return
-        data_selecionada = st.selectbox("Selecione a Data", datas_disponiveis)
+        data_gantt = st.selectbox("Selecione o Dia para o Gantt (Aderência):", datas_disponiveis)
 
-    if agente_selecionado and data_selecionada:
-        st.write(f"Visualizando aderência para **{agente_selecionado}** em **{data_selecionada.strftime('%d/%m/%Y')}**")
-
-        # Exibir o gráfico de Gantt
-        fig_gantt = _gantt_aderencia(df_hist, df_escala, agente_selecionado, datetime.combine(data_selecionada, time.min))
-        st.plotly_chart(fig_gantt, use_container_width=True)
-
-        # Exibir o resumo de aderência
-        st.subheader("Resumo de Tempo por Estado")
-        resumo_df = _resumo_aderencia(df_hist, df_escala, agente_selecionado, datetime.combine(data_selecionada, time.min))
-        if not resumo_df.empty:
-            st.dataframe(resumo_df, use_container_width=True)
-        else:
-            st.info("Nenhum resumo de tempo disponível para os estados selecionados.")
+    if agente_gantt and data_gantt:
+        fig_gantt_aderencia = _gantt_aderencia(df_filtrado_aderencia, df_escala, agente_gantt, datetime.combine(data_gantt, time.min))
+        st.plotly_chart(fig_gantt_aderencia, use_container_width=True)
