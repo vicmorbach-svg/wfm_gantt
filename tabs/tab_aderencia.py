@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, time, timedelta
-from config import CORES_ESTADOS, ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_IMPRODUTIVOS, DIAS_SEMANA_ORDEM # Usar CORES_ESTADOS
+from config import CORES_ESTADOS, ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_IMPRODUTIVOS, DIAS_SEMANA_ORDEM # Usando CORES_ESTADOS
 
 def _gantt_aderencia(df_agente_dia: pd.DataFrame, df_escala_agente_dia: pd.DataFrame, agente_gantt: str, data_gantt: datetime):
     if df_agente_dia.empty:
