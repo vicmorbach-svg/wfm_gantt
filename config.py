@@ -1,4 +1,14 @@
 # config.py
+import os
+
+# Define o diretório base para os arquivos de dados
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+os.makedirs(DATA_DIR, exist_ok=True) # Garante que o diretório 'data' existe
+
+# Caminhos para os arquivos de armazenamento
+HISTORICO_PATH = os.path.join(DATA_DIR, "historico_agentes.parquet")
+ESCALA_PATH = os.path.join(DATA_DIR, "escala_agentes.parquet")
 
 # Estados a serem considerados para o cálculo de aderência e exibição
 ESTADOS_ADMISSAO = [
@@ -7,6 +17,9 @@ ESTADOS_ADMISSAO = [
     "Unified offline",
     "Unified transfers only"
 ]
+
+# ESTADOS_INTERESSE é agora definido, usando ESTADOS_ADMISSAO como base
+ESTADOS_INTERESSE = ESTADOS_ADMISSAO
 
 # Estados a serem excluídos (lista vazia conforme solicitado)
 ESTADOS_EXCLUIR = []
@@ -19,8 +32,8 @@ ESTADOS_IMPRODUTIVOS = ["Unified offline"] # Considerado improdutivo para aderê
 # Ordem dos dias da semana para gráficos
 DIAS_SEMANA_ORDEM = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
 
-# Cores para os status no gráfico de Gantt e outras visualizações
-CORES_STATUS = {
+# Cores para os status no gráfico de Gantt e outras visualizações (renomeado para CORES_ESTADOS)
+CORES_ESTADOS = {
     "Unified online":         "#28a745", # Verde
     "Unified away":           "#ffc107", # Amarelo
     "Unified offline":        "#dc3545", # Vermelho
@@ -28,6 +41,9 @@ CORES_STATUS = {
     # Adicione outras cores se houver outros estados que possam aparecer e você queira colorir
     # "Outro Estado": "#6c757d", # Cinza
 }
+
+# Limite de minutos para alerta de "Unified away" no dashboard
+LIMITE_ALERTA_AWAY_MINUTOS = 30 # Exemplo: 30 minutos
 
 # Cores para o tema claro e escuro (se aplicável, para consistência)
 CORES_TEMA = {
