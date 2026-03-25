@@ -1,7 +1,7 @@
 # utils/data_loader.py
 import pandas as pd
 from datetime import datetime, timedelta
-import streamlit as st # Adicione esta linha
+import streamlit as st
 from config import ESTADOS_INTERESSE, ESTADOS_EXCLUIR, DIAS_SEMANA_ORDEM
 
 def processar_arquivo(uploaded_file) -> pd.DataFrame:
@@ -9,14 +9,7 @@ def processar_arquivo(uploaded_file) -> pd.DataFrame:
         # Ler o arquivo Excel
         df = pd.read_excel(uploaded_file)
 
-        # Limpar nomes das colunas: remover espaços extras e caracteres especiais
-        df.columns = df.columns.str.strip()
-        df.columns = df.columns.str.replace(r'[^\w\s]', '', regex=True) # Remove caracteres não alfanuméricos (exceto espaços)
-        df.columns = df.columns.str.replace(r'\s+', ' ', regex=True) # Substitui múltiplos espaços por um único espaço
-        df.columns = df.columns.str.strip() # Remove espaços no início/fim novamente
-
         # Mapeamento dos nomes originais das colunas para os nomes padronizados
-        # Usando os nomes exatos do arquivo Excel fornecido
         col_mapping = {
             "Nome do agente": "agente",
             "Hora de início do estado - Carimbo de data/hora": "inicio",
@@ -25,16 +18,31 @@ def processar_arquivo(uploaded_file) -> pd.DataFrame:
             "Tempo do agente no estado / Minutos": "minutos"
         }
 
-        # Verificar se todas as colunas esperadas existem no DataFrame
-        colunas_esperadas_originais = list(col_mapping.keys())
-        colunas_faltantes = [col for col in colunas_esperadas_originais if col not in df.columns]
+        # Limpar nomes das colunas do DataFrame para facilitar a correspondência
+        # Remover espaços extras no início/fim e substituir múltiplos espaços por um único
+        df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
+
+        # Verificar se todas as colunas esperadas (após a limpeza básica) existem no DataFrame
+        # Precisamos verificar se as chaves do col_mapping existem no df.columns
+        colunas_esperadas_originais_limpas = [col.strip().replace(r'\s+', ' ', regex=True) for col in col_mapping.keys()]
+        colunas_faltantes = [col for col in colunas_esperadas_originais_limpas if col not in df.columns]
 
         if colunas_faltantes:
-            raise ValueError(f"As seguintes colunas esperadas não foram encontradas no arquivo: {', '.join(colunas_faltantes)}. "
+            # Tentar um mapeamento mais flexível se as colunas exatas não forem encontradas
+            # Criar um dicionário reverso para mapear os nomes limpos de volta aos originais para a mensagem de erro
+            reverse_col_mapping = {v: k for k, v in col_mapping.items()}
+            original_missing_cols = [reverse_col_mapping.get(col, col) for col in colunas_faltantes]
+
+            raise ValueError(f"As seguintes colunas esperadas não foram encontradas no arquivo: {', '.join(original_missing_cols)}. "
                              f"Colunas disponíveis: {', '.join(df.columns)}")
 
-        # Selecionar e renomear as colunas de interesse
-        df = df[colunas_esperadas_originais].rename(columns=col_mapping)
+        # Renomear as colunas de interesse usando o mapeamento
+        # Criar um novo dicionário de mapeamento com as chaves limpas
+        cleaned_col_mapping = {col.strip().replace(r'\s+', ' ', regex=True): new_name for col, new_name in col_mapping.items()}
+        df = df.rename(columns=cleaned_col_mapping)
+
+        # Selecionar apenas as colunas padronizadas
+        df = df[list(col_mapping.values())]
 
         # Converter colunas de tempo para datetime
         # Usar errors='coerce' para transformar valores inválidos em NaT (Not a Time)
@@ -90,9 +98,11 @@ def processar_arquivo(uploaded_file) -> pd.DataFrame:
 
     except ValueError as e:
         st.error(f"Erro ao processar o arquivo: {e}")
+        st.exception(e) # Exibe o traceback completo para depuração
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado: {e}")
+        st.exception(e) # Exibe o traceback completo para depuração
         return pd.DataFrame()
 
 def get_agentes(df: pd.DataFrame) -> list:
