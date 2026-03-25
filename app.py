@@ -7,7 +7,8 @@ from utils.data_loader import processar_arquivo, get_agentes
 from tabs.tab_dashboard import render as tab_dashboard
 from tabs.tab_aderencia import render as tab_aderencia
 from tabs.tab_escala import render as tab_escala
-from config import ESTADOS_ADMISSAO, ESTADOS_EXCLUIR, ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_IMPRODUTIVOS, CORES_STATUS
+from storage import carregar_historico, salvar_historico, limpar_historico, carregar_escala, salvar_escala, escala_para_display
+from config import ESTADOS_ADMISSAO, ESTADOS_EXCLUIR, ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_IMPRODUTIVOS, CORES_ESTADOS, LIMITE_ALERTA_AWAY_MINUTOS
 
 st.set_page_config(layout="wide", page_title="WFM Gantt & Dashboard")
 
@@ -25,7 +26,12 @@ def main():
         df_p = processar_arquivo(arq)
         if not df_p.empty:
             df_hist = df_p
+            salvar_historico(df_hist) # Salva o histórico processado
             agentes = get_agentes(df_hist) # Get agents after processing
+    else:
+        df_hist = carregar_historico() # Tenta carregar o histórico salvo
+        if not df_hist.empty:
+            agentes = get_agentes(df_hist)
 
     if df_hist.empty:
         st.warning("Por favor, carregue um arquivo para visualizar os dados.")
@@ -41,38 +47,37 @@ def main():
     else:
         df_filtrado_agente = df_hist
 
-    # Se a aba de escala for selecionada, precisamos de um df_escala.
-    # Por enquanto, vamos criar um df_escala dummy ou assumir que ele virá de outro lugar.
-    # Para o propósito deste exemplo, vamos criar um df_escala simples.
-    # Em um cenário real, df_escala seria carregado ou gerado de outra fonte.
-    df_escala = pd.DataFrame({
-        "agente": df_hist["agente"].unique(),
-        "data": pd.to_datetime(df_hist["inicio"].dt.date.unique()),
-        "hora_inicio_escala": pd.to_datetime("08:00:00").time(),
-        "hora_fim_escala": pd.to_datetime("17:00:00").time(),
-    })
-    # Expandir df_escala para ter uma linha por agente por dia
-    all_dates = pd.to_datetime(df_hist["inicio"].dt.date.unique())
-    all_agents = df_hist["agente"].unique()
-    df_escala_expanded = []
-    for agent in all_agents:
-        for date in all_dates:
-            df_escala_expanded.append({
-                "agente": agent,
-                "data": date,
-                "hora_inicio_escala": pd.to_datetime("08:00:00").time(),
-                "hora_fim_escala": pd.to_datetime("17:00:00").time(),
-            })
-    df_escala = pd.DataFrame(df_escala_expanded)
-    df_escala["data"] = pd.to_datetime(df_escala["data"]) # Ensure datetime type
+    # Carregar a escala real usando a função de storage
+    df_escala = carregar_escala()
+
+    # Se a escala estiver vazia, podemos criar uma escala padrão inicial para preencher
+    if df_escala.empty and not df_hist.empty:
+        all_dates = pd.to_datetime(df_hist["inicio"].dt.date.unique())
+        all_agents = df_hist["agente"].unique()
+        df_escala_expanded = []
+        for agent in all_agents:
+            for date in all_dates:
+                df_escala_expanded.append({
+                    "agente": agent,
+                    "data": date,
+                    "hora_inicio_escala": pd.to_datetime("08:00:00").time(),
+                    "hora_fim_escala": pd.to_datetime("17:00:00").time(),
+                    "dia_semana": date.strftime("%A"), # Adiciona dia da semana
+                    "dia_semana_num": date.weekday(), # Adiciona número do dia da semana
+                    "intervalos_json": "[]", # Inicializa com JSON vazio
+                    "observacao": ""
+                })
+        df_escala = pd.DataFrame(df_escala_expanded)
+        df_escala["data"] = pd.to_datetime(df_escala["data"]) # Garante tipo datetime
+        salvar_escala(df_escala) # Salva a escala padrão inicial
 
     # Renderizar a aba selecionada
     if selected_tab == "Dashboard":
-        tab_dashboard.render(df_filtrado_agente, df_escala) # Pass df_escala
+        tab_dashboard.render(df_filtrado_agente, LIMITE_ALERTA_AWAY_MINUTOS)
     elif selected_tab == "Aderência":
-        tab_aderencia.render(df_filtrado_agente, df_escala) # Pass df_escala
+        tab_aderencia.render(df_filtrado_agente, df_escala)
     elif selected_tab == "Escala":
-        tab_escala.render(df_escala) # Pass df_escala
+        tab_escala.render(df_escala)
 
 if __name__ == "__main__":
     main()
