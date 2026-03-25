@@ -3,7 +3,6 @@ import json
 import pandas as pd
 from config import HISTORICO_PATH, ESCALA_PATH
 
-
 # ── HISTÓRICO ──────────────────────────────────────────────────────────────────
 
 def carregar_historico() -> pd.DataFrame:
@@ -11,15 +10,12 @@ def carregar_historico() -> pd.DataFrame:
         return pd.read_parquet(HISTORICO_PATH)
     return pd.DataFrame()
 
-
 def salvar_historico(df: pd.DataFrame):
     df.to_parquet(HISTORICO_PATH, index=False)
-
 
 def limpar_historico():
     if os.path.exists(HISTORICO_PATH):
         os.remove(HISTORICO_PATH)
-
 
 # ── ESCALA ─────────────────────────────────────────────────────────────────────
 
@@ -29,16 +25,13 @@ ESCALA_COLS = [
     "intervalos_json", "observacao",
 ]
 
-
 def carregar_escala() -> pd.DataFrame:
     if os.path.exists(ESCALA_PATH):
         return pd.read_parquet(ESCALA_PATH)
     return pd.DataFrame(columns=ESCALA_COLS)
 
-
 def salvar_escala(df: pd.DataFrame):
     df.to_parquet(ESCALA_PATH, index=False)
-
 
 def escala_para_display(df_escala: pd.DataFrame) -> pd.DataFrame:
     """Converte JSON de intervalos para texto legível."""
