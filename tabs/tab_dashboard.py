@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from config import CORES_ESTADOS, DIAS_SEMANA_ORDEM, ESTADOS_INTERESSE, LIMITE_ALERTA_AWAY_MINUTOS
+from config import CORES_ESTADOS, DIAS_SEMANA_ORDEM, ESTADOS_INTERESSE, LIMITE_ALERTA_AWAY_MINUTOS # Importar LIMITE_ALERTA_AWAY_MINUTOS
 
 def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_selecionada: datetime):
     if df_filtrado.empty:
