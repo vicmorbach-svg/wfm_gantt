@@ -73,7 +73,7 @@ def main():
 
     # Renderizar a aba selecionada
     if selected_tab == "Dashboard":
-        tab_dashboard.render(df_filtrado_agente, LIMITE_ALERTA_AWAY_MINUTOS)
+        tab_dashboard.render(df_filtrado_agente, df_escala, LIMITE_ALERTA_AWAY_MINUTOS)
     elif selected_tab == "Aderência":
         tab_aderencia.render(df_filtrado_agente, df_escala)
     elif selected_tab == "Escala":
