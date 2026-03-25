@@ -98,11 +98,11 @@ def processar_arquivo(uploaded_file) -> pd.DataFrame:
 
     except ValueError as e:
         st.error(f"Erro ao processar o arquivo: {e}")
-        st.exception(e) # Exibe o traceback completo para depuração
+        st.exception(e) # Adicione esta linha para ver o traceback completo
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado: {e}")
-        st.exception(e) # Exibe o traceback completo para depuração
+        st.exception(e) # Adicione esta linha
         return pd.DataFrame()
 
 def get_agentes(df: pd.DataFrame) -> list:
