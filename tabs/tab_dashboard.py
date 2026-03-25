@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from config import CORES_ESTADOS, DIAS_SEMANA_ORDEM, ESTADOS_INTERESSE
+from config import CORES_ESTADOS, DIAS_SEMANA_ORDEM, ESTADOS_INTERESSE, LIMITE_ALERTA_AWAY_MINUTOS
 
 def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_selecionada: datetime):
     if df_filtrado.empty:
@@ -27,7 +27,7 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
         x_end="fim",
         y="agente",
         color="estado",
-        color_discrete_map=CORES_ESTADOS,
+        color_discrete_map=CORES_ESTADOS, # Usando CORES_ESTADOS
         title=f"Gantt de Atividades para {agente_selecionado} em {data_selecionada.strftime('%d/%m/%Y')}",
         hover_name="estado",
         hover_data={
@@ -89,7 +89,7 @@ def _resumo_estados_por_agente(df_filtrado: pd.DataFrame, limite_alerta: int):
         x="horas",
         y="agente",
         color="estado",
-        color_discrete_map=CORES_ESTADOS,
+        color_discrete_map=CORES_ESTADOS, # Usando CORES_ESTADOS
         title="Tempo Total em Cada Estado por Agente (Horas)",
         orientation="h",
         hover_data={"minutos": True, "horas": ":.2f"},
@@ -159,8 +159,7 @@ def _metricas_principais(df_filtrado: pd.DataFrame, limite_alerta: int):
         # Se quiser "Transfers Only" em uma 6ª coluna, descomente e adicione col6 acima
         # st.metric("Tempo Transfers Only", f"{transfers_only_horas:.2f} h")
 
-
-def render(df_hist: pd.DataFrame, limite_alerta: int):
+def render(df_hist: pd.DataFrame, limite_alerta: int = LIMITE_ALERTA_AWAY_MINUTOS): # Adicionado limite_alerta com valor padrão
     st.header("Dashboard de Produtividade do Agente")
 
     # Obter agentes e data do df_hist (que já está filtrado por data na main)
