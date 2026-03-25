@@ -2,6 +2,7 @@
 import pandas as pd
 from datetime import datetime, timedelta
 import streamlit as st
+import re # Importar o módulo 're' para expressões regulares
 from config import ESTADOS_INTERESSE, ESTADOS_EXCLUIR, DIAS_SEMANA_ORDEM
 
 def processar_arquivo(uploaded_file) -> pd.DataFrame:
@@ -19,18 +20,21 @@ def processar_arquivo(uploaded_file) -> pd.DataFrame:
         }
 
         # Limpar nomes das colunas do DataFrame para facilitar a correspondência
-        # Remover espaços extras no início/fim e substituir múltiplos espaços por um único
-        df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
+        # Usar re.sub para substituição de regex, que é mais robusto
+        df.columns = [re.sub(r'\s+', ' ', col).strip() for col in df.columns]
+        # Remover caracteres não alfanuméricos (exceto espaços) - se ainda for necessário
+        # df.columns = [re.sub(r'[^\w\s]', '', col).strip() for col in df.columns]
 
         # Verificar se todas as colunas esperadas (após a limpeza básica) existem no DataFrame
         # Precisamos verificar se as chaves do col_mapping existem no df.columns
-        colunas_esperadas_originais_limpas = [col.strip().replace(r'\s+', ' ', regex=True) for col in col_mapping.keys()]
+        # Usar re.sub para limpar as chaves do mapeamento também
+        colunas_esperadas_originais_limpas = [re.sub(r'\s+', ' ', col).strip() for col in col_mapping.keys()]
         colunas_faltantes = [col for col in colunas_esperadas_originais_limpas if col not in df.columns]
 
         if colunas_faltantes:
             # Tentar um mapeamento mais flexível se as colunas exatas não forem encontradas
             # Criar um dicionário reverso para mapear os nomes limpos de volta aos originais para a mensagem de erro
-            reverse_col_mapping = {v: k for k, v in col_mapping.items()}
+            reverse_col_mapping = {re.sub(r'\s+', ' ', k).strip(): k for k in col_mapping.keys()}
             original_missing_cols = [reverse_col_mapping.get(col, col) for col in colunas_faltantes]
 
             raise ValueError(f"As seguintes colunas esperadas não foram encontradas no arquivo: {', '.join(original_missing_cols)}. "
@@ -38,11 +42,8 @@ def processar_arquivo(uploaded_file) -> pd.DataFrame:
 
         # Renomear as colunas de interesse usando o mapeamento
         # Criar um novo dicionário de mapeamento com as chaves limpas
-        cleaned_col_mapping = {col.strip().replace(r'\s+', ' ', regex=True): new_name for col, new_name in col_mapping.items()}
+        cleaned_col_mapping = {re.sub(r'\s+', ' ', k).strip(): v for k, v in col_mapping.items()}
         df = df.rename(columns=cleaned_col_mapping)
-
-        # Selecionar apenas as colunas padronizadas
-        df = df[list(col_mapping.values())]
 
         # Converter colunas de tempo para datetime
         # Usar errors='coerce' para transformar valores inválidos em NaT (Not a Time)
@@ -98,11 +99,11 @@ def processar_arquivo(uploaded_file) -> pd.DataFrame:
 
     except ValueError as e:
         st.error(f"Erro ao processar o arquivo: {e}")
-        st.exception(e) # Adicione esta linha para ver o traceback completo
+        st.exception(e) # Adicione esta linha para ver o traceback completo no Streamlit
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado: {e}")
-        st.exception(e) # Adicione esta linha para ver o traceback completo
+        st.exception(e) # Adicione esta linha para ver o traceback completo no Streamlit
         return pd.DataFrame()
 
 def get_agentes(df: pd.DataFrame) -> list:
