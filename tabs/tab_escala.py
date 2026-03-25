@@ -18,7 +18,7 @@ def render(df_escala: pd.DataFrame):
     st.dataframe(df_escala_formatada.set_index(["Agente", "Dia"]))
 
     # Opcional: Adicionar filtros para a escala
-    agentes_escala = df_escala["agente"].unique().tolist()
+    agentes_escala = df_escala_formatada["Agente"].unique().tolist() # Usar df_escala_formatada para os agentes
     agente_selecionado_escala = st.selectbox("Filtrar escala por agente:", ["Todos"] + agentes_escala)
 
     if agente_selecionado_escala != "Todos":
