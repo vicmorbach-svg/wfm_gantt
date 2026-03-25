@@ -102,7 +102,7 @@ def processar_arquivo(uploaded_file) -> pd.DataFrame:
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado: {e}")
-        st.exception(e) # Adicione esta linha
+        st.exception(e) # Adicione esta linha para ver o traceback completo
         return pd.DataFrame()
 
 def get_agentes(df: pd.DataFrame) -> list:
