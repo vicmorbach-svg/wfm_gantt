@@ -1,6 +1,5 @@
 import pandas as pd
 
-
 def deduplicar(df: pd.DataFrame) -> pd.DataFrame:
     """Remove duplicatas exatas de agente + início + fim + estado."""
     if df.empty:
