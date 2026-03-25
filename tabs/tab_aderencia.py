@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, time, timedelta
-from config import CORES_STATUS, ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_IMPRODUTIVOS, DIAS_SEMANA_ORDEM
+from config import CORES_ESTADOS, ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_IMPRODUTIVOS, DIAS_SEMANA_ORDEM
 
 def _gantt_aderencia(df_agente_dia: pd.DataFrame, df_escala_agente_dia: pd.DataFrame, agente_gantt: str, data_gantt: datetime):
     if df_agente_dia.empty:
@@ -34,7 +34,7 @@ def _gantt_aderencia(df_agente_dia: pd.DataFrame, df_escala_agente_dia: pd.DataF
         x_end="fim",
         y="agente",
         color="estado",
-        color_discrete_map=CORES_STATUS,
+        color_discrete_map=CORES_ESTADOS, # Usando CORES_ESTADOS
         title=f"Linha do Tempo do Agente: {agente_gantt} em {data_gantt.strftime('%d/%m/%Y')}"
     )
 
