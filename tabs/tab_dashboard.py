@@ -159,7 +159,7 @@ def _metricas_principais(df_filtrado: pd.DataFrame, limite_alerta: int):
         # Se quiser "Transfers Only" em uma 6ª coluna, descomente e adicione col6 acima
         # st.metric("Tempo Transfers Only", f"{transfers_only_horas:.2f} h")
 
-def render(df_hist: pd.DataFrame, limite_alerta: int): # Adicionado limite_alerta como parâmetro
+def render(df_hist: pd.DataFrame, df_escala: pd.DataFrame, limite_alerta: int): # Adicionado limite_alerta como parâmetro
     st.header("Dashboard de Produtividade do Agente")
 
     # Obter agentes e data do df_hist (que já está filtrado por data na main)
