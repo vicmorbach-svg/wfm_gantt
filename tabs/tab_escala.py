@@ -2,126 +2,137 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, time, date # Importar date e time
 import json
-from storage import escala_para_display, salvar_escala, carregar_escala # Importar salvar_escala e carregar_escala
-from config import MAP_WEEKDAY_TO_NAME # Para mapear dia da semana
+from storage import escala_para_display, salvar_escala # Importa a função de display e salvar
+from config import MAP_WEEKDAY_TO_NAME # Importar MAP_WEEKDAY_TO_NAME
 
 def render(df_escala: pd.DataFrame):
-    st.title("Gestão da Escala")
+    st.title("Gestão da Escala de Trabalho")
 
-    # Recarregar escala para garantir que as operações de CRUD sejam refletidas
-    df_escala = carregar_escala()
+    # --- Seção de Adicionar/Editar Escala ---
+    st.subheader("Adicionar ou Editar Entrada de Escala")
 
-    if df_escala.empty:
-        st.info("Nenhum dado de escala disponível. Adicione uma escala abaixo.")
-    else:
-        st.subheader("Escala de Trabalho Atual")
-        # Usar a função escala_para_display do módulo storage para formatar
-        df_escala_formatada = escala_para_display(df_escala)
-        st.dataframe(df_escala_formatada.set_index(["Agente", "Data", "Dia"]), use_container_width=True)
-
-    st.subheader("Adicionar/Editar Entrada de Escala")
-
-    # Obter lista de agentes do histórico (se houver) ou da escala existente
+    # Obter lista de agentes únicos da escala existente ou do histórico (se houver)
     agentes_existentes = sorted(df_escala["agente"].unique().tolist()) if not df_escala.empty else []
-    # Se houver histórico, podemos pegar agentes de lá também
-    if 'df_hist' in st.session_state and not st.session_state.df_hist.empty:
-        agentes_do_historico = st.session_state.df_hist["agente"].unique().tolist()
-        agentes_existentes = sorted(list(set(agentes_existentes + agentes_do_historico)))
 
     with st.form("form_escala"):
         col1, col2 = st.columns(2)
         with col1:
-            agente_selecionado = st.selectbox("Agente:", ["Novo Agente"] + agentes_existentes, key="escala_agente_select")
-            if agente_selecionado == "Novo Agente":
-                novo_agente = st.text_input("Nome do Novo Agente:", key="escala_novo_agente_input")
-                agente_final = novo_agente if novo_agente else None
-            else:
-                agente_final = agente_selecionado
-
-            data_escala = st.date_input("Data da Escala:", value=datetime.now().date(), key="escala_data_input")
-            hora_inicio = st.time_input("Hora de Início:", value=time(8, 0), key="escala_inicio_input")
-            hora_fim = st.time_input("Hora de Fim:", value=time(17, 0), key="escala_fim_input")
-
+            agente_input = st.selectbox("Agente:", [""] + agentes_existentes, key="agente_escala_input")
+            data_input = st.date_input("Data:", value=datetime.now().date(), key="data_escala_input")
+            hora_inicio_input = st.time_input("Hora Início:", value=time(8, 0), key="inicio_escala_input")
         with col2:
-            intervalos_json_str = st.text_area("Intervalos (JSON - ex: [{\"nome\": \"Almoço\", \"inicio\": \"12:00\", \"fim\": \"13:00\"}]):", value="[]", key="escala_intervalos_input")
-            observacao = st.text_area("Observação:", key="escala_observacao_input")
+            hora_fim_input = st.time_input("Hora Fim:", value=time(17, 0), key="fim_escala_input")
+            intervalos_input = st.text_area("Intervalos (JSON, ex: [{\"inicio\":\"12:00\",\"fim\":\"13:00\"}]):", value="[]", key="intervalos_escala_input")
+            observacao_input = st.text_area("Observação:", key="obs_escala_input")
+
+        # Campo para ID de edição (opcional)
+        id_edicao = st.number_input("ID da Entrada para Editar (deixe 0 para Adicionar Nova):", min_value=0, value=0, step=1, key="id_edicao_escala")
 
         submitted = st.form_submit_button("Salvar Escala")
 
         if submitted:
-            if not agente_final:
-                st.error("Por favor, insira o nome do agente.")
-            elif hora_inicio >= hora_fim:
+            if not agente_input:
+                st.error("O nome do agente não pode ser vazio.")
+            elif hora_inicio_input >= hora_fim_input:
                 st.error("A hora de início deve ser anterior à hora de fim.")
             else:
                 try:
                     # Validar JSON de intervalos
-                    intervalos_validos = json.loads(intervalos_json_str)
-                    if not isinstance(intervalos_validos, list):
-                        raise ValueError("O JSON de intervalos deve ser uma lista.")
-                    for intervalo in intervalos_validos:
-                        if not all(k in intervalo for k in ["nome", "inicio", "fim"]):
-                            raise ValueError("Cada intervalo deve ter 'nome', 'inicio' e 'fim'.")
+                    parsed_intervalos = json.loads(intervalos_input)
+                    if not isinstance(parsed_intervalos, list):
+                        raise ValueError("Intervalos devem ser uma lista JSON.")
+                    for interval in parsed_intervalos:
+                        if not isinstance(interval, dict) or "inicio" not in interval or "fim" not in interval:
+                            raise ValueError("Cada intervalo deve ser um objeto com 'inicio' e 'fim'.")
                         # Tentar converter para time para validar formato
-                        time.fromisoformat(intervalo["inicio"])
-                        time.fromisoformat(intervalo["fim"])
+                        time.fromisoformat(interval["inicio"])
+                        time.fromisoformat(interval["fim"])
 
                     nova_entrada = {
-                        "agente": agente_final,
-                        "data": data_escala,
-                        "dia_semana": MAP_WEEKDAY_TO_NAME[data_escala.weekday()],
-                        "dia_semana_num": data_escala.weekday(),
-                        "hora_inicio_escala": hora_inicio,
-                        "hora_fim_escala": hora_fim,
-                        "intervalos_json": intervalos_json_str,
-                        "observacao": observacao
+                        "agente": agente_input,
+                        "data": data_input,
+                        "hora_inicio_escala": hora_inicio_input,
+                        "hora_fim_escala": hora_fim_input,
+                        "dia_semana": MAP_WEEKDAY_TO_NAME[data_input.weekday()],
+                        "dia_semana_num": data_input.weekday(),
+                        "intervalos_json": intervalos_input, # Salvar como string JSON
+                        "observacao": observacao_input
                     }
 
-                    # Verificar se já existe uma entrada para o mesmo agente e data
-                    idx_existente = df_escala[
-                        (df_escala["agente"] == agente_final) &
-                        (df_escala["data"] == data_escala)
-                    ].index
-
-                    if not idx_existente.empty:
-                        # Atualizar entrada existente
-                        df_escala.loc[idx_existente, list(nova_entrada.keys())] = list(nova_entrada.values())
-                        st.success(f"Escala para {agente_final} em {data_escala.strftime('%d/%m/%Y')} atualizada com sucesso!")
+                    if id_edicao > 0 and not df_escala.empty:
+                        # Edição
+                        if id_edicao <= len(df_escala):
+                            idx_real = id_edicao - 1
+                            for key, value in nova_entrada.items():
+                                df_escala.loc[idx_real, key] = value
+                            salvar_escala(df_escala)
+                            st.session_state.df_escala = df_escala # Atualiza o session_state
+                            st.success(f"Entrada de escala ID {id_edicao} atualizada com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error(f"ID {id_edicao} não encontrado para edição.")
                     else:
-                        # Adicionar nova entrada
-                        df_escala = pd.concat([df_escala, pd.DataFrame([nova_entrada])], ignore_index=True)
-                        st.success(f"Escala para {agente_final} em {data_escala.strftime('%d/%m/%Y')} adicionada com sucesso!")
-
-                    salvar_escala(df_escala)
-                    st.session_state.df_escala = df_escala # Atualiza o session_state
-                    st.rerun() # Recarrega a página para mostrar a escala atualizada
+                        # Adição
+                        if df_escala.empty:
+                            df_escala = pd.DataFrame([nova_entrada], columns=df_escala.columns if not df_escala.empty else nova_entrada.keys())
+                        else:
+                            df_escala = pd.concat([df_escala, pd.DataFrame([nova_entrada])], ignore_index=True)
+                        salvar_escala(df_escala)
+                        st.session_state.df_escala = df_escala # Atualiza o session_state
+                        st.success("Nova entrada de escala adicionada com sucesso!")
+                        st.rerun()
 
                 except json.JSONDecodeError:
-                    st.error("Formato JSON inválido para os intervalos. Por favor, verifique a sintaxe.")
+                    st.error("Formato JSON inválido para intervalos. Por favor, verifique.")
                 except ValueError as ve:
                     st.error(f"Erro de validação: {ve}")
                 except Exception as e:
                     st.error(f"Ocorreu um erro ao salvar a escala: {e}")
 
+    st.subheader("Escala de Trabalho Atual")
+
+    if df_escala.empty:
+        st.info("Nenhum dado de escala disponível. Adicione entradas acima.")
+        return
+
+    # Usar a função escala_para_display do módulo storage para formatar
+    df_escala_formatada = escala_para_display(df_escala)
+
+    # Filtros para a tabela de escala
+    col_filter1, col_filter2 = st.columns(2)
+    with col_filter1:
+        agentes_escala_filter = ["Todos"] + sorted(df_escala_formatada["Agente"].unique().tolist())
+        agente_selecionado_escala_filter = st.selectbox("Filtrar por Agente:", agentes_escala_filter, key="filter_agente_escala")
+    with col_filter2:
+        dias_escala_filter = ["Todos"] + sorted(df_escala_formatada["Dia"].unique().tolist(), key=lambda x: list(MAP_WEEKDAY_TO_NAME.values()).index(x) if x in MAP_WEEKDAY_TO_NAME.values() else 99)
+        dia_selecionado_escala_filter = st.selectbox("Filtrar por Dia:", dias_escala_filter, key="filter_dia_escala")
+
+    df_escala_exibicao = df_escala_formatada.copy()
+    if agente_selecionado_escala_filter != "Todos":
+        df_escala_exibicao = df_escala_exibicao[df_escala_exibicao["Agente"] == agente_selecionado_escala_filter]
+    if dia_selecionado_escala_filter != "Todos":
+        df_escala_exibicao = df_escala_exibicao[df_escala_exibicao["Dia"] == dia_selecionado_escala_filter]
+
+    if df_escala_exibicao.empty:
+        st.info("Nenhuma entrada de escala encontrada com os filtros aplicados.")
+    else:
+        st.dataframe(df_escala_exibicao.set_index("ID"), use_container_width=True)
+
+    # --- Seção de Excluir Escala ---
     st.subheader("Excluir Entrada de Escala")
-    if not df_escala.empty:
-        df_escala_formatada_para_excluir = df_escala_formatada.copy()
-        df_escala_formatada_para_excluir["ID"] = df_escala_formatada_para_excluir.index # Adiciona um ID para seleção
-
-        st.dataframe(df_escala_formatada_para_excluir.set_index("ID"), use_container_width=True)
-
-        id_para_excluir = st.number_input("Digite o ID da entrada de escala para excluir:", min_value=0, max_value=len(df_escala)-1, step=1, key="escala_excluir_id")
-
-        if st.button("Excluir Escala", key="escala_excluir_button"):
-            if id_para_excluir in df_escala.index:
-                agente_excluido = df_escala.loc[id_para_excluir, "agente"]
-                data_excluida = df_escala.loc[id_para_excluir, "data"].strftime('%d/%m/%Y')
-                df_escala = df_escala.drop(id_para_excluir).reset_index(drop=True)
+    id_para_excluir = st.number_input("Digite o ID da entrada para excluir:", min_value=0, value=0, step=1, key="id_excluir_escala")
+    if st.button("Excluir Entrada", key="btn_excluir_escala"):
+        if id_para_excluir > 0 and not df_escala.empty:
+            if id_para_excluir <= len(df_escala):
+                idx_real = id_para_excluir - 1
+                agente_excluido = df_escala.loc[idx_real, "agente"]
+                data_excluida = df_escala.loc[idx_real, "data"].strftime('%d/%m/%Y')
+                df_escala = df_escala.drop(idx_real).reset_index(drop=True)
                 salvar_escala(df_escala)
                 st.session_state.df_escala = df_escala # Atualiza o session_state
                 st.success(f"Escala para {agente_excluido} em {data_excluida} excluída com sucesso!")
                 st.rerun()
             else:
                 st.error("ID inválido. Por favor, digite um ID existente na tabela.")
-    else:
-        st.info("Não há entradas de escala para excluir.")
+        else:
+            st.info("Não há entradas de escala para excluir ou ID inválido.")
