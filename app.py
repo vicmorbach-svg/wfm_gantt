@@ -105,7 +105,7 @@ def main():
 
     # Renderizar a aba selecionada
     if selected_tab == "Dashboard":
-        tab_dashboard.render(df_hist_filtrado_global, df_escala, LIMITE_ALERTA_AWAY_MINUTOS, data_selecionada)
+        tab_dashboard.render (df_hist_filtrado_global, df_escala, limite_alerta, data_selecionada_global)
     elif selected_tab == "Aderência":
         # Para a aba de aderência, passamos o df_hist completo (filtrado apenas pelo agente global, se houver)
         # para que ela possa aplicar seus próprios filtros de data de início/fim.
