@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta, date, time # Adicione 'date' e 'time' aqui
+from datetime import datetime, timedelta, date # Importar 'date' aqui
 from config import CORES_ESTADOS, DIAS_SEMANA_ORDEM, ESTADOS_INTERESSE, LIMITE_ALERTA_AWAY_MINUTOS
 
 def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_selecionada: date): # data_selecionada agora é date
@@ -39,8 +39,8 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
 
     # Definir o range do eixo X para cobrir o dia inteiro
     # Usar datetime.combine para criar objetos datetime a partir de date e time
-    data_inicio_dia = datetime.combine(data_selecionada, time.min)
-    data_fim_dia = datetime.combine(data_selecionada, time.max)
+    data_inicio_dia = datetime.combine(data_selecionada, datetime.min.time())
+    data_fim_dia = datetime.combine(data_selecionada, datetime.max.time())
 
     fig.update_xaxes(
         range=[data_inicio_dia, data_fim_dia],
@@ -54,7 +54,7 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
     # Adicionar linhas verticais para cada hora
     for h in range(24):
         fig.add_vline(
-            x=datetime.combine(data_selecionada, time(h)), # Usar datetime.combine
+            x=datetime.combine(data_selecionada, datetime.min.time().replace(hour=h)), # Usar datetime.combine
             line_width=1,
             line_dash="dot",
             line_color="gray"
@@ -87,90 +87,75 @@ def _resumo_estados_por_agente(df_filtrado: pd.DataFrame, limite_alerta: int):
         y="agente",
         color="estado",
         color_discrete_map=CORES_ESTADOS,
-        title="Tempo Total em Cada Estado por Agente (Horas)",
-        orientation="h",
-        hover_data={"minutos": True, "horas": ":.2f"},
+        title="Tempo Total em Cada Estado por Agente",
+        labels={"horas": "Tempo (horas)", "agente": "Agente", "estado": "Estado"},
+        orientation="h"
+    )
+    fig.update_layout(
+        xaxis_title="Tempo (horas)",
+        yaxis_title="Agente",
+        hovermode="y unified",
         height=400 + len(resumo_estados["agente"].unique()) * 30
     )
-
-    fig.update_layout(
-        xaxis_title="Horas",
-        yaxis_title="Agente",
-        legend_title="Estado"
-    )
-
-    if "Unified away" in resumo_estados["estado"].unique():
-        df_away = resumo_estados[(resumo_estados["estado"] == "Unified away") & (resumo_estados["minutos"] > limite_alerta)]
-        if not df_away.empty:
-            for _, row in df_away.iterrows():
-                fig.add_annotation(
-                    x=row["horas"],
-                    y=row["agente"],
-                    text=f"Alerta! {row['minutos']:.0f} min",
-                    showarrow=True,
-                    arrowhead=2,
-                    arrowsize=1,
-                    arrowwidth=2,
-                    arrowcolor="#ff0000",
-                    font=dict(color="#ff0000", size=10),
-                    ax=20,
-                    ay=-30
-                )
-
     return fig
 
-def _metricas_principais(df_filtrado: pd.DataFrame, limite_alerta: int):
+def _metricas_principais(df_filtrado: pd.DataFrame, df_escala: pd.DataFrame, limite_alerta: int, data_selecionada: date):
     if df_filtrado.empty:
-        st.warning("Não há dados para exibir as métricas principais.")
+        st.info("Não há dados para calcular as métricas principais.")
         return
 
-    total_minutos = df_filtrado["minutos"].sum()
-    total_horas = total_minutos / 60
+    # Filtrar escala para a data selecionada
+    df_escala_dia = df_escala[df_escala["data"] == data_selecionada]
 
-    online_minutos = df_filtrado[df_filtrado["estado"] == "Unified online"]["minutos"].sum()
-    online_horas = online_minutos / 60
+    total_agentes_ativos = df_filtrado["agente"].nunique()
+    total_minutos_away = df_filtrado[df_filtrado["estado"] == "Unified away"]["minutos"].sum()
+    total_minutos_online = df_filtrado[df_filtrado["estado"] == "Unified online"]["minutos"].sum()
 
-    away_minutos = df_filtrado[df_filtrado["estado"] == "Unified away"]["minutos"].sum()
-    away_horas = away_minutos / 60
+    # Calcular aderência (exemplo simplificado)
+    # Soma dos minutos produtivos no dia
+    minutos_produtivos_dia = df_filtrado[df_filtrado["estado"].isin(["Unified online", "Unified transfers only"])]["minutos"].sum()
 
-    offline_minutos = df_filtrado[df_filtrado["estado"] == "Unified offline"]["minutos"].sum()
-    offline_horas = offline_minutos / 60
+    # Soma da duração da escala para os agentes presentes no histórico do dia
+    agentes_no_historico_dia = df_filtrado["agente"].unique()
+    df_escala_agentes_presentes = df_escala_dia[df_escala_dia["agente"].isin(agentes_no_historico_dia)]
 
-    transfers_only_minutos = df_filtrado[df_filtrado["estado"] == "Unified transfers only"]["minutos"].sum()
-    transfers_only_horas = transfers_only_minutos / 60
+    duracao_escala_total_minutos = 0
+    if not df_escala_agentes_presentes.empty:
+        duracao_escala_total_minutos = df_escala_agentes_presentes.apply(
+            lambda row: (datetime.combine(data_selecionada, row["hora_fim_escala"]) - datetime.combine(data_selecionada, row["hora_inicio_escala"])).total_seconds() / 60
+            if pd.notna(row["hora_inicio_escala"]) and pd.notna(row["hora_fim_escala"]) else 0,
+            axis=1
+        ).sum()
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    aderencia_percentual = (minutos_produtivos_dia / duracao_escala_total_minutos) * 100 if duracao_escala_total_minutos > 0 else 0
+    aderencia_percentual = round(aderencia_percentual, 2)
 
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total de Minutos Registrados", f"{total_minutos:.2f} min")
+        st.metric(label="Agentes Ativos (Dia)", value=total_agentes_ativos)
     with col2:
-        st.metric("Total de Horas Registradas", f"{total_horas:.2f} h")
+        st.metric(label="Tempo Online (horas)", value=f"{total_minutos_online / 60:.2f}")
     with col3:
-        st.metric("Tempo Online", f"{online_horas:.2f} h")
+        st.metric(label="Tempo Away (horas)", value=f"{total_minutos_away / 60:.2f}")
     with col4:
-        st.metric("Tempo Ausente (Away)", f"{away_horas:.2f} h", delta=f"Limite: {limite_alerta} min", delta_color="inverse" if away_minutos > limite_alerta else "normal")
-    with col5:
-        st.metric("Tempo Offline", f"{offline_horas:.2f} h")
+        st.metric(label="Aderência (%)", value=f"{aderencia_percentual:.2f}%")
+
+    if total_minutos_away > limite_alerta:
+        st.warning(f"⚠️ Alerta: Tempo total 'Away' ({total_minutos_away:.0f} minutos) excedeu o limite de {limite_alerta} minutos!")
 
 def render(df_hist_filtrado_global: pd.DataFrame, df_escala: pd.DataFrame, limite_alerta: int, data_selecionada_global: date): # data_selecionada_global agora é date
-    st.header("Dashboard de Produtividade do Agente")
+    st.title("Dashboard de Atividades dos Agentes")
 
     if df_hist_filtrado_global.empty:
-        st.info("Nenhum dado disponível para o período e agente selecionados. Por favor, carregue um arquivo ou ajuste os filtros.")
+        st.info("Não há dados de atividades para o agente e data selecionados. Por favor, ajuste os filtros ou carregue um arquivo.")
         return
 
-    agentes_disponiveis = ["Todos"] + sorted(df_hist_filtrado_global["agente"].unique())
-    agente_gantt = st.selectbox("Selecione o Agente para o Gantt", agentes_disponiveis, key="dashboard_agente_gantt") # Adicionado key
+    agente_selecionado = df_hist_filtrado_global["agente"].iloc[0] if df_hist_filtrado_global["agente"].nunique() == 1 else "Todos"
 
-    if agente_gantt != "Todos":
-        df_filtrado_gantt = df_hist_filtrado_global[df_hist_filtrado_global["agente"] == agente_gantt]
-    else:
-        df_filtrado_gantt = df_hist_filtrado_global.copy()
+    _metricas_principais(df_hist_filtrado_global, df_escala, limite_alerta, data_selecionada_global)
 
-    # A data já vem filtrada para o dia selecionado na main, então usamos data_selecionada_global
-    data_para_gantt = data_selecionada_global
+    st.subheader("Gantt de Atividades")
+    st.plotly_chart(_gantt_chart(df_hist_filtrado_global, agente_selecionado, data_selecionada_global), use_container_width=True)
 
-    _metricas_principais(df_filtrado_gantt, limite_alerta)
-
-    st.plotly_chart(_gantt_chart(df_filtrado_gantt, agente_gantt, data_para_gantt), use_container_width=True)
-    st.plotly_chart(_resumo_estados_por_agente(df_filtrado_gantt, limite_alerta), use_container_width=True)
+    st.subheader("Resumo de Estados por Agente")
+    st.plotly_chart(_resumo_estados_por_agente(df_hist_filtrado_global, limite_alerta), use_container_width=True)
