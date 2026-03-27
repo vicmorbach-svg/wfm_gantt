@@ -28,7 +28,7 @@ ESTADOS_PRODUTIVOS = ["Unified online", "Unified transfers only"]
 ESTADOS_PAUSA = ["Unified away"]
 ESTADOS_IMPRODUTIVOS = ["Unified offline"] # Considerado improdutivo para aderência
 
-# Ordem dos dias da semana para gráficos e mapeamento de weekday()
+# Ordem dos dias da semana para gráficos
 DIAS_SEMANA_ORDEM = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
 # Mapeamento para garantir que o weekday() do Python (0=seg, 6=dom) corresponda aos nomes em português
 MAP_WEEKDAY_TO_NAME = {
