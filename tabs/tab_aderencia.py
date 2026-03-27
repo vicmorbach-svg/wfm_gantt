@@ -5,125 +5,49 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, date, time # Importar date e time
 from config import CORES_ESTADOS, ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_IMPRODUTIVOS, MAP_WEEKDAY_TO_NAME
-from storage import escala_para_display # Para exibir a escala formatada
 
-def _calcular_metricas_aderencia(df_hist: pd.DataFrame, df_escala: pd.DataFrame) -> pd.DataFrame:
-    if df_hist.empty or df_escala.empty:
-        return pd.DataFrame()
-
-    # Garantir que 'data' seja datetime.date em ambos os DataFrames
-    if "data" in df_hist.columns:
-        df_hist["data"] = pd.to_datetime(df_hist["data"]).dt.date
-    if "data" in df_escala.columns:
-        df_escala["data"] = pd.to_datetime(df_escala["data"]).dt.date
-
-    # Merge do histórico com a escala pela data e agente
-    df_merged = pd.merge(df_hist, df_escala, on=["agente", "data"], how="left")
-
-    # Calcular tempo total em estados produtivos, pausa e improdutivos
-    df_merged["minutos_produtivos"] = df_merged[df_merged["estado"].isin(ESTADOS_PRODUTIVOS)]["minutos"].fillna(0)
-    df_merged["minutos_pausa"] = df_merged[df_merged["estado"].isin(ESTADOS_PAUSA)]["minutos"].fillna(0)
-    df_merged["minutos_improdutivos"] = df_merged[df_merged["estado"].isin(ESTADOS_IMPRODUTIVOS)]["minutos"].fillna(0)
-
-    # Agrupar por agente e data para obter totais diários
-    resumo_diario = df_merged.groupby(["agente", "data"]).agg(
-        total_minutos_produtivos=("minutos_produtivos", "sum"),
-        total_minutos_pausa=("minutos_pausa", "sum"),
-        total_minutos_improdutivos=("minutos_improdutivos", "sum"),
-        hora_inicio_escala=("hora_inicio_escala", "first"),
-        hora_fim_escala=("hora_fim_escala", "first")
-    ).reset_index()
-
-    # Calcular duração da escala em minutos
-    # Usar datetime.combine para criar objetos datetime para cálculo de diferença
-    resumo_diario["duracao_escala_minutos"] = resumo_diario.apply(
-        lambda row: (datetime.combine(row["data"], row["hora_fim_escala"]) - datetime.combine(row["data"], row["hora_inicio_escala"])).total_seconds() / 60
-        if pd.notna(row["hora_inicio_escala"]) and pd.notna(row["hora_fim_escala"]) else 0,
-        axis=1
-    )
-
-    # Evitar divisão por zero se a duração da escala for 0
-    resumo_diario["aderencia"] = resumo_diario.apply(
-        lambda row: (row["total_minutos_produtivos"] / row["duracao_escala_minutos"]) * 100
-        if row["duracao_escala_minutos"] > 0 else 0,
-        axis=1
-    )
-
-    # Calcular tempo "away" como porcentagem da escala
-    resumo_diario["away_percent"] = resumo_diario.apply(
-        lambda row: (row["total_minutos_pausa"] / row["duracao_escala_minutos"]) * 100
-        if row["duracao_escala_minutos"] > 0 else 0,
-        axis=1
-    )
-
-    return resumo_diario
-
-def _gantt_aderencia(df_hist: pd.DataFrame, df_escala: pd.DataFrame, data_gantt: date, agente_selecionado: str):
-    if df_hist.empty or df_escala.empty:
+def _gantt_aderencia(df_hist_filtrado: pd.DataFrame, df_escala_filtrada: pd.DataFrame, data_gantt: date): # data_gantt agora é date
+    if df_hist_filtrado.empty and df_escala_filtrada.empty:
         st.warning("Não há dados de histórico ou escala para exibir o Gantt de aderência.")
         return go.Figure()
 
-    # Filtrar histórico e escala para a data selecionada
-    df_hist_filtrado = df_hist[df_hist["data"] == data_gantt].copy()
-    df_escala_filtrada = df_escala[df_escala["data"] == data_gantt].copy()
+    df_gantt_data = []
 
-    if agente_selecionado != "Todos":
-        df_hist_filtrado = df_hist_filtrado[df_hist_filtrado["agente"] == agente_selecionado]
-        df_escala_filtrada = df_escala_filtrada[df_escala_filtrada["agente"] == agente_selecionado]
-
-    if df_hist_filtrado.empty and df_escala_filtrada.empty:
-        st.info(f"Não há dados de atividades ou escala para {agente_selecionado} em {data_gantt.strftime('%d/%m/%Y')}.")
-        return go.Figure()
-
-    # Preparar dados para o Gantt
-    gantt_data = []
-
-    # Adicionar atividades do histórico
+    # Adicionar histórico
     for _, row in df_hist_filtrado.iterrows():
-        gantt_data.append({
+        df_gantt_data.append({
             "agente": row["agente"],
-            "tipo": "Atividade Real",
-            "estado": row["estado"],
+            "tipo": "Histórico",
             "inicio": row["inicio"],
             "fim": row["fim"],
-            "cor": CORES_ESTADOS.get(row["estado"], "#6c757d") # Cor padrão cinza
+            "estado": row["estado"],
+            "cor": CORES_ESTADOS.get(row["estado"], "#cccccc")
         })
 
-    # Adicionar escala planejada
+    # Adicionar escala
     for _, row in df_escala_filtrada.iterrows():
-        # Escala principal
-        gantt_data.append({
-            "agente": row["agente"],
-            "tipo": "Escala Planejada",
-            "estado": "Escala",
-            "inicio": datetime.combine(data_gantt, row["hora_inicio_escala"]),
-            "fim": datetime.combine(data_gantt, row["hora_fim_escala"]),
-            "cor": "#4CAF50" # Verde para escala
-        })
-        # Intervalos dentro da escala (se houver)
-        if row["intervalos_json"]:
-            try:
-                intervalos = json.loads(row["intervalos_json"])
-                for intervalo in intervalos:
-                    gantt_data.append({
-                        "agente": row["agente"],
-                        "tipo": "Escala Planejada",
-                        "estado": intervalo["tipo"], # Ex: "Almoço", "Pausa"
-                        "inicio": datetime.combine(data_gantt, time.fromisoformat(intervalo["inicio"])),
-                        "fim": datetime.combine(data_gantt, time.fromisoformat(intervalo["fim"])),
-                        "cor": "#FFD700" # Amarelo para intervalos
-                    })
-            except json.JSONDecodeError:
-                st.warning(f"Formato JSON inválido para intervalos do agente {row['agente']} na data {data_gantt}.")
+        # Combinar data_gantt (date) com hora_inicio_escala (time) para criar datetime
+        inicio_escala = datetime.combine(data_gantt, row["hora_inicio_escala"])
+        fim_escala = datetime.combine(data_gantt, row["hora_fim_escala"])
 
-    df_gantt = pd.DataFrame(gantt_data)
+        df_gantt_data.append({
+            "agente": row["agente"],
+            "tipo": "Escala",
+            "inicio": inicio_escala,
+            "fim": fim_escala,
+            "estado": "Escala Planejada",
+            "cor": "#808080" # Cor cinza para escala
+        })
+
+    df_gantt = pd.DataFrame(df_gantt_data)
 
     if df_gantt.empty:
-        st.info(f"Não há dados para o Gantt de aderência para {agente_selecionado} em {data_gantt.strftime('%d/%m/%Y')}.")
+        st.warning("Não há dados para exibir o Gantt de aderência.")
         return go.Figure()
 
-    # Ordenar para visualização
-    df_gantt = df_gantt.sort_values(by=["agente", "inicio"])
+    # Ordenar por agente e depois por tipo (Escala primeiro, depois Histórico)
+    df_gantt["tipo_ordenado"] = df_gantt["tipo"].map({"Escala": 0, "Histórico": 1})
+    df_gantt = df_gantt.sort_values(by=["agente", "tipo_ordenado", "inicio"])
 
     fig = px.timeline(
         df_gantt,
@@ -131,21 +55,21 @@ def _gantt_aderencia(df_hist: pd.DataFrame, df_escala: pd.DataFrame, data_gantt:
         x_end="fim",
         y="agente",
         color="estado",
-        color_discrete_map={**CORES_ESTADOS, "Escala": "#4CAF50", "Almoço": "#FFD700", "Pausa": "#FFD700"}, # Cores adicionais
-        title=f"Gantt de Aderência para {agente_selecionado} em {data_gantt.strftime('%d/%m/%Y')}",
+        color_discrete_map={**CORES_ESTADOS, "Escala Planejada": "#808080"}, # Adiciona cor para escala
+        title=f"Gantt de Aderência para {data_gantt.strftime('%d/%m/%Y')}",
         hover_name="estado",
         hover_data={
             "inicio": "|%H:%M:%S",
             "fim": "|%H:%M:%S",
-            "tipo": True # Mostrar se é atividade real ou escala planejada
+            "tipo": True
         }
     )
 
     fig.update_yaxes(autorange="reversed")
 
     # Definir o range do eixo X para cobrir o dia inteiro
-    data_inicio_dia = datetime.combine(data_gantt, time.min)
-    data_fim_dia = datetime.combine(data_gantt, time.max)
+    data_inicio_dia = datetime.combine(data_gantt, time.min) # Usar time.min
+    data_fim_dia = datetime.combine(data_gantt, time.max) # Usar time.max
 
     fig.update_xaxes(
         range=[data_inicio_dia, data_fim_dia],
@@ -156,10 +80,9 @@ def _gantt_aderencia(df_hist: pd.DataFrame, df_escala: pd.DataFrame, data_gantt:
         gridcolor='LightGrey'
     )
 
-    # Adicionar linhas verticais para cada hora
     for h in range(24):
         fig.add_vline(
-            x=datetime.combine(data_gantt, time(h, 0, 0)),
+            x=datetime.combine(data_gantt, time(h, 0, 0)), # Usar time(h,0,0)
             line_width=1,
             line_dash="dot",
             line_color="gray"
@@ -174,103 +97,144 @@ def _gantt_aderencia(df_hist: pd.DataFrame, df_escala: pd.DataFrame, data_gantt:
 
     return fig
 
-def render(df_hist_para_aderencia: pd.DataFrame, df_escala: pd.DataFrame):
-    st.title("Análise de Aderência")
+def _calcular_metricas_aderencia(df_hist: pd.DataFrame, df_escala: pd.DataFrame) -> pd.DataFrame:
+    if df_hist.empty or df_escala.empty:
+        return pd.DataFrame()
 
-    if df_hist_para_aderencia.empty:
-        st.warning("Por favor, carregue um arquivo de dados para visualizar a aderência.")
+    # Garantir que a coluna 'data' em df_escala seja datetime.date para o merge
+    if "data" in df_escala.columns and pd.api.types.is_datetime64_any_dtype(df_escala["data"]):
+        df_escala["data"] = df_escala["data"].dt.date
+
+    # Agrupar histórico por agente e data para somar minutos produtivos
+    df_hist_produtivo = df_hist[df_hist["estado"].isin(ESTADOS_PRODUTIVOS)].copy()
+    df_hist_produtivo["data"] = df_hist_produtivo["data"].dt.date # Garantir que 'data' seja datetime.date
+    minutos_produtivos_hist = df_hist_produtivo.groupby(["agente", "data"])["minutos"].sum().reset_index()
+    minutos_produtivos_hist.rename(columns={"minutos": "minutos_produtivos_hist"}, inplace=True)
+
+    # Calcular duração da escala em minutos
+    df_escala_calc = df_escala.copy()
+    # Combinar data (date) com hora_inicio/fim (time) para criar datetime para cálculo de duração
+    df_escala_calc["inicio_dt"] = df_escala_calc.apply(lambda row: datetime.combine(row["data"], row["hora_inicio_escala"]), axis=1)
+    df_escala_calc["fim_dt"] = df_escala_calc.apply(lambda row: datetime.combine(row["data"], row["hora_fim_escala"]), axis=1)
+    df_escala_calc["duracao_escala_minutos"] = (df_escala_calc["fim_dt"] - df_escala_calc["inicio_dt"]).dt.total_seconds() / 60
+
+    # Agrupar escala por agente e data para somar duração total
+    duracao_escala_total = df_escala_calc.groupby(["agente", "data"])["duracao_escala_minutos"].sum().reset_index()
+    duracao_escala_total.rename(columns={"duracao_escala_minutos": "minutos_escala_total"}, inplace=True)
+
+    # Merge para combinar histórico e escala
+    df_metricas = pd.merge(
+        minutos_produtivos_hist,
+        duracao_escala_total,
+        on=["agente", "data"],
+        how="outer"
+    )
+
+    # Preencher NaNs com 0 para agentes/datas sem histórico ou escala
+    df_metricas["minutos_produtivos_hist"] = df_metricas["minutos_produtivos_hist"].fillna(0)
+    df_metricas["minutos_escala_total"] = df_metricas["minutos_escala_total"].fillna(0)
+
+    # Calcular aderência
+    # Evitar divisão por zero: se minutos_escala_total for 0, aderência é 0
+    df_metricas["aderencia"] = df_metricas.apply(
+        lambda row: (row["minutos_produtivos_hist"] / row["minutos_escala_total"]) * 100
+        if row["minutos_escala_total"] > 0 else 0,
+        axis=1
+    )
+
+    # Limitar aderência a 100% (não pode ser mais aderente do que o planejado)
+    df_metricas["aderencia"] = df_metricas["aderencia"].clip(upper=100)
+
+    return df_metricas
+
+def render(df_hist: pd.DataFrame, df_escala: pd.DataFrame):
+    st.title("Aderência à Escala")
+
+    if df_hist.empty:
+        st.warning("Por favor, carregue um arquivo de histórico para calcular a aderência.")
+        return
+    if df_escala.empty:
+        st.warning("Por favor, adicione entradas de escala para calcular a aderência.")
         return
 
     # Filtros de data para a aba de aderência
-    min_date_hist = df_hist_para_aderencia["data"].min()
-    max_date_hist = df_hist_para_aderencia["data"].max()
+    min_date_hist = df_hist["data"].min()
+    max_date_hist = df_hist["data"].max()
 
-    col1, col2 = st.columns(2)
-    with col1:
+    col_start, col_end = st.columns(2)
+    with col_start:
         data_inicio_aderencia = st.date_input(
             "Data de Início:",
             value=min_date_hist,
             min_value=min_date_hist,
             max_value=max_date_hist,
-            key="aderencia_data_inicio"
+            key="aderencia_start_date"
         )
-    with col2:
+    with col_end:
         data_fim_aderencia = st.date_input(
             "Data de Fim:",
             value=max_date_hist,
             min_value=min_date_hist,
             max_value=max_date_hist,
-            key="aderencia_data_fim"
+            key="aderencia_end_date"
         )
 
-    if data_inicio_aderencia > data_fim_aderencia:
-        st.error("A data de início não pode ser posterior à data de fim.")
-        return
-
-    df_hist_filtrado_periodo = df_hist_para_aderencia[
-        (df_hist_para_aderencia["data"] >= data_inicio_aderencia) &
-        (df_hist_para_aderencia["data"] <= data_fim_aderencia)
-    ].copy()
-
+    # Filtrar histórico e escala pelo período selecionado
+    df_hist_filtrado_periodo = df_hist[
+        (df_hist["data"] >= data_inicio_aderencia) & (df_hist["data"] <= data_fim_aderencia)
+    ]
     df_escala_filtrada_periodo = df_escala[
-        (df_escala["data"] >= data_inicio_aderencia) &
-        (df_escala["data"] <= data_fim_aderencia)
-    ].copy()
+        (df_escala["data"] >= data_inicio_aderencia) & (df_escala["data"] <= data_fim_aderencia)
+    ]
 
     if df_hist_filtrado_periodo.empty:
-        st.info("Não há dados de histórico para o período selecionado.")
+        st.info("Não há dados de histórico no período selecionado para calcular a aderência.")
+        return
+    if df_escala_filtrada_periodo.empty:
+        st.info("Não há dados de escala no período selecionado para calcular a aderência.")
         return
 
-    # Calcular métricas de aderência
-    df_metricas = _calcular_metricas_aderencia(df_hist_filtrado_periodo, df_escala_filtrada_periodo)
+    df_metricas_aderencia = _calcular_metricas_aderencia(df_hist_filtrado_periodo, df_escala_filtrada_periodo)
 
-    if df_metricas.empty:
-        st.info("Não foi possível calcular as métricas de aderência para o período e agentes selecionados. Verifique se há dados de escala para o período.")
+    if df_metricas_aderencia.empty:
+        st.warning("Não foi possível calcular as métricas de aderência com os dados fornecidos.")
         return
 
-    st.subheader("Métricas de Aderência por Agente e Dia")
-    st.dataframe(df_metricas.set_index(["agente", "data"]), use_container_width=True)
-
-    # Gráfico de Aderência ao longo do tempo
-    st.subheader("Aderência Média por Dia")
-    aderencia_media_dia = df_metricas.groupby("data")["aderencia"].mean().reset_index()
-    fig_aderencia_dia = px.line(
-        aderencia_media_dia,
-        x="data",
-        y="aderencia",
-        title="Aderência Média Diária",
-        labels={"data": "Data", "aderencia": "Aderência (%)"},
-        markers=True
-    )
-    fig_aderencia_dia.update_yaxes(range=[0, 100])
-    st.plotly_chart(fig_aderencia_dia, use_container_width=True)
+    st.subheader("Métricas de Aderência por Agente e Data")
+    st.dataframe(df_metricas_aderencia.style.format({
+        "minutos_produtivos_hist": "{:.0f} min",
+        "minutos_escala_total": "{:.0f} min",
+        "aderencia": "{:.2f}%"
+    }), use_container_width=True)
 
     st.subheader("Aderência Média por Agente")
-    aderencia_media_agente = df_metricas.groupby("agente")["aderencia"].mean().reset_index().sort_values("aderencia", ascending=False)
-    fig_aderencia_agente = px.bar(
+    aderencia_media_agente = df_metricas_aderencia.groupby("agente")["aderencia"].mean().reset_index()
+    aderencia_media_agente = aderencia_media_agente.sort_values("aderencia", ascending=False)
+
+    fig_aderencia = px.bar(
         aderencia_media_agente,
         x="agente",
         y="aderencia",
-        title="Aderência Média por Agente",
-        labels={"agente": "Agente", "aderencia": "Aderência (%)"}
+        title="Aderência Média à Escala por Agente",
+        labels={"agente": "Agente", "aderencia": "Aderência Média (%)"},
+        color="aderencia",
+        color_continuous_scale=px.colors.sequential.Greens,
+        height=500
     )
-    fig_aderencia_agente.update_yaxes(range=[0, 100])
-    st.plotly_chart(fig_aderencia_agente, use_container_width=True)
+    fig_aderencia.update_yaxes(range=[0, 100])
+    st.plotly_chart(fig_aderencia, use_container_width=True)
 
-    # Gantt de Aderência para um dia específico
-    st.subheader("Gantt de Aderência (Comparativo Escala vs. Real)")
-    agentes_gantt = ["Todos"] + sorted(df_hist_filtrado_periodo["agente"].unique().tolist())
-    agente_selecionado_gantt = st.selectbox("Selecione o Agente para o Gantt:", agentes_gantt, key="aderencia_gantt_agente")
+    st.subheader("Gantt de Aderência (Visualização Detalhada)")
+    # Filtro de data para o Gantt de aderência (um único dia)
+    data_gantt_aderencia = st.date_input(
+        "Selecione a Data para o Gantt de Aderência:",
+        value=data_inicio_aderencia,
+        min_value=data_inicio_aderencia,
+        max_value=data_fim_aderencia,
+        key="gantt_aderencia_date"
+    )
 
-    datas_disponiveis_gantt = sorted(df_hist_filtrado_periodo["data"].unique().tolist())
-    if datas_disponiveis_gantt:
-        data_gantt = st.date_input(
-            "Selecione a Data para o Gantt:",
-            value=datas_disponiveis_gantt[0],
-            min_value=datas_disponiveis_gantt[0],
-            max_value=datas_disponiveis_gantt[-1],
-            key="aderencia_gantt_data"
-        )
-        st.plotly_chart(_gantt_aderencia(df_hist_filtrado_periodo, df_escala_filtrada_periodo, data_gantt, agente_selecionado_gantt), use_container_width=True)
-    else:
-        st.info("Não há datas disponíveis para o Gantt de aderência no período selecionado.")
+    df_hist_gantt = df_hist_filtrado_periodo[df_hist_filtrado_periodo["data"] == data_gantt_aderencia]
+    df_escala_gantt = df_escala_filtrada_periodo[df_escala_filtrada_periodo["data"] == data_gantt_aderencia]
+
+    st.plotly_chart(_gantt_aderencia(df_hist_gantt, df_escala_gantt, data_gantt_aderencia), use_container_width=True)
