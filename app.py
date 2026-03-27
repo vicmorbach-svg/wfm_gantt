@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, date # Importar time e date
 
 # Importar funções e configurações
 from utils.data_loader import processar_arquivo, get_agentes
@@ -40,14 +40,13 @@ def main():
 
     if df_hist.empty:
         st.warning("Por favor, carregue um arquivo de dados para visualizar as informações.")
-        # Se não há histórico, não há agentes para filtrar nem datas
         agentes = []
-        min_date = datetime.now().date()
-        max_date = datetime.now().date()
+        min_date_hist = datetime.now().date()
+        max_date_hist = datetime.now().date()
     else:
         agentes = get_agentes(df_hist)
-        min_date = df_hist["data"].min()
-        max_date = df_hist["data"].max()
+        min_date_hist = df_hist["data"].min() # 'data' já é datetime.date
+        max_date_hist = df_hist["data"].max() # 'data' já é datetime.date
 
     # --- Filtros Globais ---
     st.sidebar.header("Filtros Globais")
@@ -56,9 +55,9 @@ def main():
     if not df_hist.empty:
         data_selecionada = st.sidebar.date_input(
             "Selecione a Data:",
-            value=max_date, # Padrão para a data mais recente
-            min_value=min_date,
-            max_value=max_date,
+            value=max_date_hist, # Padrão para a data mais recente
+            min_value=min_date_hist,
+            max_value=max_date_hist,
             key="global_date_filter"
         )
     else:
@@ -83,11 +82,15 @@ def main():
     # --- Gerar Escala Padrão se Vazia ---
     if df_escala.empty and not df_hist.empty:
         st.sidebar.info("Nenhuma escala encontrada. Gerando uma escala padrão inicial (08:00-17:00) para todos os agentes e datas no histórico.")
-        all_dates_in_hist = pd.to_datetime(df_hist["data"].unique())
+
+        # Correção aqui: df_hist["data"] já é uma série de datetime.date
+        # Para obter datas únicas como datetime.date, basta usar .unique()
+        all_dates_in_hist = df_hist["data"].unique() # Agora retorna array de datetime.date
         all_agents_in_hist = df_hist["agente"].unique()
+
         df_escala_expanded = []
         for agent in all_agents_in_hist:
-            for date_obj in all_dates_in_hist:
+            for date_obj in all_dates_in_hist: # date_obj já é datetime.date
                 df_escala_expanded.append({
                     "agente": agent,
                     "data": date_obj, # Já é datetime.date
@@ -106,14 +109,12 @@ def main():
     if selected_tab == "Dashboard":
         tab_dashboard.render(df_hist_filtrado_global, df_escala, LIMITE_ALERTA_AWAY_MINUTOS, data_selecionada)
     elif selected_tab == "Aderência":
-        # Para a aba de aderência, passamos o df_hist filtrado apenas pelo agente global,
-        # pois ela tem seus próprios filtros de data de início/fim.
-        # No entanto, se o filtro global de agente for "Todos", passamos o df_hist completo
-        # para o período selecionado na própria aba de aderência.
+        # Para a aba de aderência, passamos o df_hist completo (filtrado apenas pelo agente global, se houver)
+        # para que ela possa aplicar seus próprios filtros de data de início/fim.
         if agente_selecionado_global != "Todos":
             df_hist_para_aderencia = df_hist[df_hist["agente"] == agente_selecionado_global]
         else:
-            df_hist_para_aderencia = df_hist.copy() # A aba de aderência fará o filtro de data
+            df_hist_para_aderencia = df_hist.copy()
 
         tab_aderencia.render(df_hist_para_aderencia, df_escala)
     elif selected_tab == "Escala":
