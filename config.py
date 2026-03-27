@@ -11,15 +11,13 @@ HISTORICO_PATH = os.path.join(DATA_DIR, "historico_agentes.parquet")
 ESCALA_PATH = os.path.join(DATA_DIR, "escala_agentes.parquet")
 
 # Estados a serem considerados para o cálculo de aderência e exibição
-ESTADOS_ADMISSAO = [
+# Mantendo ESTADOS_INTERESSE como a lista principal de estados a serem processados
+ESTADOS_INTERESSE = [
     "Unified online",
     "Unified away",
     "Unified offline",
     "Unified transfers only"
 ]
-
-# ESTADOS_INTERESSE é agora definido, usando ESTADOS_ADMISSAO como base
-ESTADOS_INTERESSE = ESTADOS_ADMISSAO
 
 # Estados a serem excluídos (lista vazia conforme solicitado)
 ESTADOS_EXCLUIR = []
@@ -29,8 +27,18 @@ ESTADOS_PRODUTIVOS = ["Unified online", "Unified transfers only"]
 ESTADOS_PAUSA = ["Unified away"]
 ESTADOS_IMPRODUTIVOS = ["Unified offline"] # Considerado improdutivo para aderência
 
-# Ordem dos dias da semana para gráficos
+# Ordem dos dias da semana para gráficos e mapeamento de weekday()
 DIAS_SEMANA_ORDEM = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+# Mapeamento para garantir que o weekday() do Python (0=seg, 6=dom) corresponda aos nomes em português
+MAP_WEEKDAY_TO_NAME = {
+    0: "Segunda-feira",
+    1: "Terça-feira",
+    2: "Quarta-feira",
+    3: "Quinta-feira",
+    4: "Sexta-feira",
+    5: "Sábado",
+    6: "Domingo"
+}
 
 # Cores para os status no gráfico de Gantt e outras visualizações (renomeado para CORES_ESTADOS)
 CORES_ESTADOS = {
