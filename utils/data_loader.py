@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import streamlit as st
 import re
-from config import ESTADOS_INTERESSE, ESTADOS_EXCLUIR, MAP_WEEKDAY_TO_NAME # Usar MAP_WEEKDAY_TO_NAME
+from config import ESTADOS_INTERESSE, ESTADOS_EXCLUIR, MAP_WEEKDAY_TO_NAME # Importar MAP_WEEKDAY_TO_NAME
 from dedup import deduplicar # Importar a função de deduplicação
 
 def processar_arquivo(uploaded_file) -> pd.DataFrame:
