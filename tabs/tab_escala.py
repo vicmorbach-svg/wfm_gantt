@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, time, timedelta
+import json # Importar json para lidar com intervalos
 from storage import escala_para_display, salvar_escala, carregar_escala # Importar funções de salvar/carregar
 from config import MAP_WEEKDAY_TO_NAME, DIAS_SEMANA_ORDEM # Para dias da semana
 
@@ -54,8 +55,8 @@ def render(df_escala_original: pd.DataFrame, agentes_disponiveis: list):
                 else:
                     # Tentar parsear intervalos como JSON, se falhar, salvar como string
                     try:
-                        intervalos_json = intervalos_str # Assume que o usuário pode inserir JSON válido
-                        json.loads(intervalos_json) # Tenta carregar para validar
+                        json.loads(intervalos_str) # Tenta carregar para validar
+                        intervalos_json = intervalos_str
                     except json.JSONDecodeError:
                         st.warning("Formato de intervalos inválido. Salvando como texto simples. Por favor, use formato JSON válido (ex: [{\"nome\": \"Almoço\", \"inicio\": \"12:00\", \"fim\": \"13:00\"}]).")
                         intervalos_json = json.dumps([{"nome": "Custom", "inicio": "N/A", "fim": "N/A", "descricao": intervalos_str}]) # Salva como um JSON com a string
@@ -82,7 +83,8 @@ def render(df_escala_original: pd.DataFrame, agentes_disponiveis: list):
 
                     if not idx_existente.empty:
                         # Atualizar registro existente
-                        df_escala.loc[idx_existente, list(novo_registro.keys())] = list(novo_registro.values())
+                        for key, value in novo_registro.items():
+                            df_escala.loc[idx_existente, key] = value
                         st.success(f"Escala para {agente} em {data_escala.strftime('%d/%m/%Y')} atualizada com sucesso!")
                     else:
                         # Adicionar novo registro
