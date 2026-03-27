@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta, time, date # Importar date
+from datetime import datetime, timedelta, date, time # Adicione 'date' e 'time' aqui
 from config import CORES_ESTADOS, DIAS_SEMANA_ORDEM, ESTADOS_INTERESSE, LIMITE_ALERTA_AWAY_MINUTOS
 
 def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_selecionada: date): # data_selecionada agora é date
@@ -38,6 +38,7 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
     fig.update_yaxes(autorange="reversed")
 
     # Definir o range do eixo X para cobrir o dia inteiro
+    # Usar datetime.combine para criar objetos datetime a partir de date e time
     data_inicio_dia = datetime.combine(data_selecionada, time.min)
     data_fim_dia = datetime.combine(data_selecionada, time.max)
 
@@ -53,7 +54,7 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
     # Adicionar linhas verticais para cada hora
     for h in range(24):
         fig.add_vline(
-            x=datetime.combine(data_selecionada, time(h, 0, 0)),
+            x=datetime.combine(data_selecionada, time(h)), # Usar datetime.combine com time(h)
             line_width=1,
             line_dash="dot",
             line_color="gray"
