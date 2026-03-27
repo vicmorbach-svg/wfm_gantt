@@ -2,128 +2,140 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, time, timedelta, date # Importar date
-from config import CORES_ESTADOS, ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_IMPRODUTIVOS, MAP_WEEKDAY_TO_NAME # Usar MAP_WEEKDAY_TO_NAME
+from datetime import datetime, timedelta, date, time # Importar date e time
+from config import CORES_ESTADOS, ESTADOS_PRODUTIVOS, ESTADOS_PAUSA, ESTADOS_IMPRODUTIVOS
 
-def _gantt_aderencia(df_agente_dia: pd.DataFrame, df_escala_agente_dia: pd.DataFrame, agente_gantt: str, data_gantt: date): # data_gantt agora é date
-    if df_agente_dia.empty:
-        st.warning(f"Não há dados para o agente {agente_gantt} no dia {data_gantt.strftime('%d/%m/%Y')}.")
-        return go.Figure()
-
-    # Filtrar para o agente e dia selecionados
-    df_gantt = df_agente_dia[
-        (df_agente_dia["agente"] == agente_gantt) &
-        (df_agente_dia["data"] == data_gantt) # Comparar diretamente com datetime.date
+def _gantt_aderencia(df_hist: pd.DataFrame, df_escala: pd.DataFrame, agente: str, data_gantt: date): # data_gantt agora é date
+    df_hist_agente_dia = df_hist[
+        (df_hist["agente"] == agente) &
+        (df_hist["data"] == data_gantt) # Comparar com datetime.date
     ].copy()
 
-    if df_gantt.empty:
-        st.warning(f"Não há dados para o agente {agente_gantt} no dia {data_gantt.strftime('%d/%m/%Y')}.")
+    df_escala_agente_dia = df_escala[
+        (df_escala["agente"] == agente) &
+        (df_escala["data"] == data_gantt) # Comparar com datetime.date
+    ].copy()
+
+    if df_hist_agente_dia.empty and df_escala_agente_dia.empty:
+        st.warning(f"Não há dados de histórico ou escala para o agente {agente} em {data_gantt.strftime('%d/%m/%Y')}.")
         return go.Figure()
 
-    # Garantir que as colunas de tempo são datetime
-    df_gantt["inicio"] = pd.to_datetime(df_gantt["inicio"])
-    df_gantt["fim"] = pd.to_datetime(df_gantt["fim"])
+    # Preparar dados do histórico
+    df_hist_agente_dia["tipo"] = "Real"
+    df_hist_agente_dia["inicio_dt"] = df_hist_agente_dia["inicio"]
+    df_hist_agente_dia["fim_dt"] = df_hist_agente_dia["fim"]
 
-    # Ordenar por início para garantir a sequência correta
-    df_gantt = df_gantt.sort_values(by="inicio").reset_index(drop=True)
+    # Preparar dados da escala
+    df_escala_agente_dia["tipo"] = "Escala"
+    # Combinar data com hora para criar datetime objects
+    df_escala_agente_dia["inicio_dt"] = df_escala_agente_dia.apply(lambda r: datetime.combine(r["data"], r["hora_inicio_escala"]), axis=1)
+    df_escala_agente_dia["fim_dt"] = df_escala_agente_dia.apply(lambda r: datetime.combine(r["data"], r["hora_fim_escala"]), axis=1)
+    df_escala_agente_dia["estado"] = "Escala Prevista" # Estado para a escala
 
-    # Criar o gráfico de Gantt
+    # Combinar dados para o Gantt
+    df_gantt = pd.concat([
+        df_hist_agente_dia[["agente", "estado", "inicio_dt", "fim_dt", "tipo"]],
+        df_escala_agente_dia[["agente", "estado", "inicio_dt", "fim_dt", "tipo"]]
+    ], ignore_index=True)
+
+    # Definir cores para o Gantt de aderência
+    cores_aderencia = CORES_ESTADOS.copy()
+    cores_aderencia["Escala Prevista"] = "#6c757d" # Cinza para a escala
+
     fig = px.timeline(
         df_gantt,
-        x_start="inicio",
-        x_end="fim",
-        y="agente",
+        x_start="inicio_dt",
+        x_end="fim_dt",
+        y="tipo", # Mostrar "Real" e "Escala" separadamente
         color="estado",
-        color_discrete_map=CORES_ESTADOS,
-        title=f"Linha do Tempo do Agente: {agente_gantt} em {data_gantt.strftime('%d/%m/%Y')}"
+        color_discrete_map=cores_aderencia,
+        title=f"Aderência da Escala para {agente} em {data_gantt.strftime('%d/%m/%Y')}",
+        hover_name="estado",
+        hover_data={
+            "inicio_dt": "|%H:%M:%S",
+            "fim_dt": "|%H:%M:%S",
+            "agente": False,
+            "tipo": False
+        }
     )
-
-    # Adicionar a barra de escala
-    escala_dia = df_escala_agente_dia[
-        (df_escala_agente_dia["agente"] == agente_gantt) &
-        (df_escala_agente_dia["data"] == data_gantt) # Comparar diretamente com datetime.date
-    ]
-
-    if not escala_dia.empty:
-        escala_inicio = datetime.combine(data_gantt, escala_dia["hora_inicio_escala"].iloc[0])
-        escala_fim = datetime.combine(data_gantt, escala_dia["hora_fim_escala"].iloc[0])
-
-        fig.add_trace(go.Scatter(
-            x=[escala_inicio, escala_fim],
-            y=[agente_gantt, agente_gantt],
-            mode='lines',
-            line=dict(color='blue', width=4, dash='dot'),
-            name='Escala Prevista',
-            hoverinfo='text',
-            text=[f"Escala: {escala_inicio.strftime('%H:%M')} - {escala_fim.strftime('%H:%M')}",
-                  f"Escala: {escala_inicio.strftime('%H:%M')} - {escala_fim.strftime('%H:%M')}"]
-        ))
-
-    # Ajustar o layout do gráfico
-    fig.update_layout(
-        xaxis_title="Hora do Dia",
-        yaxis_title="Agente",
-        hovermode="x unified",
-        barmode="overlay",
-        height=200,
-        margin=dict(l=140, r=20, t=60, b=50),
-        xaxis=dict(
-            tickformat="%H:%M",
-            dtick="H1", # Tick a cada hora
-            range=[
-                datetime.combine(data_gantt, time.min),
-                datetime.combine(data_gantt, time.max)
-            ]
-        )
-    )
-
-    # Adicionar linhas verticais para cada hora do dia
-    for h in range(24):
-        fig.add_vline(
-            x=datetime.combine(data_gantt, time(h)), # Usar datetime.combine com time(h)
-            line_width=0.5,
-            line_dash="dot",
-            line_color="gray",
-            annotation_text=f"{h:02d}:00",
-            annotation_position="top right",
-            annotation_font_size=10,
-            annotation_font_color="gray"
-        )
 
     fig.update_yaxes(autorange="reversed")
+
+    # Definir o range do eixo X para cobrir o dia inteiro
+    data_inicio_dia = datetime.combine(data_gantt, time.min)
+    data_fim_dia = datetime.combine(data_gantt, time.max)
+
+    fig.update_xaxes(
+        range=[data_inicio_dia, data_fim_dia],
+        tickformat="%H:%M",
+        dtick=3600000, # 1 hora em milissegundos
+        showgrid=True,
+        gridwidth=1,
+        gridcolor='LightGrey'
+    )
+
+    # Adicionar linhas verticais para cada hora
+    for h in range(24):
+        fig.add_vline(
+            x=datetime.combine(data_gantt, time(h)),
+            line_width=1,
+            line_dash="dot",
+            line_color="gray"
+        )
+
+    fig.update_layout(
+        xaxis_title="Hora do Dia",
+        yaxis_title="Tipo de Registro",
+        hovermode="x unified",
+        height=400
+    )
+
     return fig
 
-def _calcular_metricas_aderencia(df_filtrado: pd.DataFrame, df_escala: pd.DataFrame):
-    if df_filtrado.empty:
+def _calcular_metricas_aderencia(df_hist: pd.DataFrame, df_escala: pd.DataFrame) -> pd.DataFrame:
+    if df_hist.empty or df_escala.empty:
         return pd.DataFrame()
 
-    # 'data' já deve ser datetime.date do data_loader
-    df_sum = df_filtrado.groupby(["agente", "data", "estado"])["minutos"].sum().reset_index()
+    # Garantir que 'data' em df_escala seja datetime.date para o merge
+    if 'data' in df_escala.columns:
+        df_escala['data'] = pd.to_datetime(df_escala['data']).dt.date
 
-    df_pivot = df_sum.pivot_table(index=["agente", "data"], columns="estado", values="minutos", fill_value=0).reset_index()
+    # Merge do histórico com a escala pela data e agente
+    df_merged = pd.merge(
+        df_hist,
+        df_escala,
+        on=["agente", "data"], # Merge pela data e agente
+        how="left",
+        suffixes=("_hist", "_escala")
+    )
 
-    df_pivot["Tempo Produtivo (min)"] = df_pivot[[col for col in ESTADOS_PRODUTIVOS if col in df_pivot.columns]].sum(axis=1)
-    df_pivot["Tempo em Pausa (min)"] = df_pivot[[col for col in ESTADOS_PAUSA if col in df_pivot.columns]].sum(axis=1)
-    df_pivot["Tempo Improdutivo (min)"] = df_pivot[[col for col in ESTADOS_IMPRODUTIVOS if col in df_pivot.columns]].sum(axis=1)
+    # Preencher NaNs para agentes sem escala no dia (ou remover, dependendo da lógica)
+    df_merged.dropna(subset=["hora_inicio_escala", "hora_fim_escala"], inplace=True)
 
-    df_escala_copy = df_escala.copy()
-    # Garantir que a coluna 'data' na escala seja datetime.date para o merge
-    if 'data' in df_escala_copy.columns:
-        df_escala_copy['data'] = pd.to_datetime(df_escala_copy['data']).dt.date
+    if df_merged.empty:
+        return pd.DataFrame()
 
-    df_metricas = pd.merge(df_pivot, df_escala_copy, on=["agente", "data"], how="left")
+    # Calcular tempo produtivo, em pausa e improdutivo
+    df_merged["Tempo Produtivo (min)"] = df_merged[df_merged["estado"].isin(ESTADOS_PRODUTIVOS)]["minutos"].fillna(0)
+    df_merged["Tempo em Pausa (min)"] = df_merged[df_merged["estado"].isin(ESTADOS_PAUSA)]["minutos"].fillna(0)
+    df_merged["Tempo Improdutivo (min)"] = df_merged[df_merged["estado"].isin(ESTADOS_IMPRODUTIVOS)]["minutos"].fillna(0)
 
-    # Preencher NaNs para agentes/dias sem escala para evitar erros no cálculo
-    # Se não houver escala, a duração da escala será 0, resultando em aderência 0
-    df_metricas["hora_inicio_escala"] = df_metricas["hora_inicio_escala"].fillna(time(0,0))
-    df_metricas["hora_fim_escala"] = df_metricas["hora_fim_escala"].fillna(time(0,0))
+    # Agrupar por agente e data para somar os tempos
+    df_metricas = df_merged.groupby(["agente", "data"]).agg(
+        {"Tempo Produtivo (min)": "sum",
+         "Tempo em Pausa (min)": "sum",
+         "Tempo Improdutivo (min)": "sum",
+         "hora_inicio_escala": "first", # Pegar o primeiro horário de escala do dia
+         "hora_fim_escala": "first"}    # Pegar o último horário de escala do dia
+    ).reset_index()
 
-    df_metricas['inicio_escala_dt'] = df_metricas.apply(lambda row: datetime.combine(row['data'], row['hora_inicio_escala']), axis=1)
-    df_metricas['fim_escala_dt'] = df_metricas.apply(lambda row: datetime.combine(row['data'], row['hora_fim_escala']), axis=1)
-    df_metricas["Duracao Escala (min)"] = (df_metricas["fim_escala_dt"] - df_metricas["inicio_escala_dt"]).dt.total_seconds() / 60
+    # Calcular duração da escala
+    df_metricas["Duracao Escala (min)"] = (
+        df_metricas.apply(lambda r: datetime.combine(r["data"], r["hora_fim_escala"]) - datetime.combine(r["data"], r["hora_inicio_escala"]), axis=1)
+    ).dt.total_seconds() / 60
     df_metricas["Duracao Escala (min)"] = df_metricas["Duracao Escala (min)"].apply(lambda x: x if x > 0 else 0) # Garante duração não negativa
 
-    # Evitar divisão por zero
+    # Calcular aderência e ociosidade
     df_metricas["Aderência (%)"] = (
         (df_metricas["Tempo Produtivo (min)"] + df_metricas["Tempo em Pausa (min)"]) / df_metricas["Duracao Escala (min)"]
     ) * 100
@@ -152,8 +164,9 @@ def render(df_hist: pd.DataFrame, df_escala: pd.DataFrame):
     with col2:
         data_fim_aderencia = st.date_input("Data de Fim:", min_value=min_date, max_value=max_date, value=max_date, key="aderencia_data_fim")
 
+    # Filtrar df_hist por data (agora comparando datetime.date)
     df_filtrado_aderencia = df_hist[
-        (df_hist["data"] >= data_inicio_aderencia) & # Comparar diretamente com date objects
+        (df_hist["data"] >= data_inicio_aderencia) &
         (df_hist["data"] <= data_fim_aderencia)
     ]
 
