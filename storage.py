@@ -1,9 +1,8 @@
-# storage.py
 import os
 import json
 import pandas as pd
 from config import HISTORICO_PATH, ESCALA_PATH, MAP_WEEKDAY_TO_NAME
-from datetime import datetime, time
+from datetime import datetime, time, date # Importar date
 
 # ── HISTÓRICO ──────────────────────────────────────────────────────────────────
 
@@ -16,7 +15,8 @@ def carregar_historico() -> pd.DataFrame:
         if "fim" in df.columns:
             df["fim"] = pd.to_datetime(df["fim"])
         if "data" in df.columns:
-            df["data"] = pd.to_datetime(df["data"]).dt.date # Armazenar como date object
+            # Converter para datetime e depois para date object para consistência
+            df["data"] = pd.to_datetime(df["data"]).dt.date 
         return df
     return pd.DataFrame()
 
@@ -32,10 +32,10 @@ def limpar_historico():
 
 # ── ESCALA ─────────────────────────────────────────────────────────────────────
 
-# Adicionando 'data' à lista de colunas da escala
+# Adicionando 'data' à lista de colunas da escala e renomeando 'turno_inicio'/'turno_fim'
 ESCALA_COLS = [
     "agente", "data", "dia_semana", "dia_semana_num",
-    "hora_inicio_escala", "hora_fim_escala",
+    "hora_inicio_escala", "hora_fim_escala", # Renomeado para consistência
     "intervalos_json", "observacao",
 ]
 
@@ -46,9 +46,10 @@ def carregar_escala() -> pd.DataFrame:
         if "data" in df.columns:
             df["data"] = pd.to_datetime(df["data"]).dt.normalize() # Garante que seja datetime sem hora
         if "hora_inicio_escala" in df.columns:
-            df["hora_inicio_escala"] = df["hora_inicio_escala"].apply(lambda x: pd.to_datetime(str(x)).time() if isinstance(x, str) else x)
+            # Converte para time object, lidando com strings ou outros formatos
+            df["hora_inicio_escala"] = df["hora_inicio_escala"].apply(lambda x: pd.to_datetime(str(x)).time() if isinstance(x, (str, time)) else x)
         if "hora_fim_escala" in df.columns:
-            df["hora_fim_escala"] = df["hora_fim_escala"].apply(lambda x: pd.to_datetime(str(x)).time() if isinstance(x, str) else x)
+            df["hora_fim_escala"] = df["hora_fim_escala"].apply(lambda x: pd.to_datetime(str(x)).time() if isinstance(x, (str, time)) else x)
         return df
     return pd.DataFrame(columns=ESCALA_COLS)
 
@@ -75,7 +76,7 @@ def escala_para_display(df_escala: pd.DataFrame) -> pd.DataFrame:
             txt = "—"
         rows.append({
             "Agente":         r["agente"],
-            "Data":           r["data"].strftime("%d/%m/%Y") if pd.notna(r["data"]) else "",
+            "Data":           r["data"].strftime("%d/%m/%Y") if pd.notna(r["data"]) and isinstance(r["data"], date) else "",
             "Dia":            r["dia_semana"],
             "Turno Início":   r["hora_inicio_escala"].strftime("%H:%M") if pd.notna(r["hora_inicio_escala"]) else "",
             "Turno Fim":      r["hora_fim_escala"].strftime("%H:%M") if pd.notna(r["hora_fim_escala"]) else "",
