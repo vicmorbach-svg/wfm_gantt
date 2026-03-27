@@ -11,13 +11,14 @@ HISTORICO_PATH = os.path.join(DATA_DIR, "historico_agentes.parquet")
 ESCALA_PATH = os.path.join(DATA_DIR, "escala_agentes.parquet")
 
 # Estados a serem considerados para o cálculo de aderência e exibição
-# Mantendo ESTADOS_INTERESSE como a lista principal de estados a serem processados
-ESTADOS_INTERESSE = [
+ESTADOS_ADMISSAO = [
     "Unified online",
     "Unified away",
     "Unified offline",
     "Unified transfers only"
 ]
+
+ESTADOS_INTERESSE = ESTADOS_ADMISSAO
 
 # Estados a serem excluídos (lista vazia conforme solicitado)
 ESTADOS_EXCLUIR = []
@@ -40,14 +41,12 @@ MAP_WEEKDAY_TO_NAME = {
     6: "Domingo"
 }
 
-# Cores para os status no gráfico de Gantt e outras visualizações (renomeado para CORES_ESTADOS)
+# Cores para os status no gráfico de Gantt e outras visualizações
 CORES_ESTADOS = {
     "Unified online":         "#28a745", # Verde
     "Unified away":           "#ffc107", # Amarelo
     "Unified offline":        "#dc3545", # Vermelho
     "Unified transfers only": "#17a2b8", # Azul claro (ou outro para diferenciar)
-    # Adicione outras cores se houver outros estados que possam aparecer e você queira colorir
-    # "Outro Estado": "#6c757d", # Cinza
 }
 
 # Limite de minutos para alerta de "Unified away" no dashboard
