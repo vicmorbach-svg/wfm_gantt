@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import streamlit as st
 import re
-from config import ESTADOS_INTERESSE, ESTADOS_EXCLUIR, MAP_WEEKDAY_TO_NAME # Importar MAP_WEEKDAY_TO_NAME
+from config import ESTADOS_INTERESSE, ESTADOS_EXCLUIR, MAP_WEEKDAY_TO_NAME # Usar MAP_WEEKDAY_TO_NAME
 from dedup import deduplicar # Importar a função de deduplicação
 
 def processar_arquivo(uploaded_file) -> pd.DataFrame:
@@ -60,18 +60,15 @@ def processar_arquivo(uploaded_file) -> pd.DataFrame:
                         "inicio": inicio,
                         "fim": end_of_segment,
                         "minutos": duration_segment,
-                        "data": current_day_start.date() # Armazenar como date object
+                        "data": current_day_start.date() # Armazenar como datetime.date
                     })
 
                 inicio = end_of_segment
-                current_day_start = inicio.normalize()
+                current_day_start = inicio.normalize() # Atualiza para o início do próximo dia
 
         df_final = pd.DataFrame(df_processado)
 
-        if df_final.empty:
-            return pd.DataFrame()
-
-        # Adicionar coluna 'dia_semana' usando o mapeamento
+        # Adicionar coluna 'dia_semana' e 'dia_semana_num' usando MAP_WEEKDAY_TO_NAME
         df_final["dia_semana"] = df_final["data"].apply(lambda x: MAP_WEEKDAY_TO_NAME[x.weekday()])
         df_final["dia_semana_num"] = df_final["data"].apply(lambda x: x.weekday())
 
@@ -82,14 +79,15 @@ def processar_arquivo(uploaded_file) -> pd.DataFrame:
 
     except ValueError as e:
         st.error(f"Erro ao processar o arquivo: {e}")
-        # st.exception(e) # Comentado para evitar traceback completo para o usuário final
+        # st.exception(e) # Comentar para evitar mostrar o traceback completo ao usuário final
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"Ocorreu um erro inesperado ao processar o arquivo: {e}. Por favor, verifique o formato do arquivo.")
-        # st.exception(e) # Comentado
+        st.error(f"Ocorreu um erro inesperado: {e}")
+        # st.exception(e) # Comentar para evitar mostrar o traceback completo ao usuário final
         return pd.DataFrame()
 
 def get_agentes(df: pd.DataFrame) -> list:
+    """Retorna uma lista de agentes únicos do DataFrame."""
     if df.empty:
         return []
     return sorted(df["agente"].unique().tolist())
