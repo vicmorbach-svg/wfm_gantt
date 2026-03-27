@@ -3,10 +3,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, date # Importar date
 from config import CORES_ESTADOS, DIAS_SEMANA_ORDEM, ESTADOS_INTERESSE, LIMITE_ALERTA_AWAY_MINUTOS
 
-def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_selecionada: datetime.date):
+def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_selecionada: date): # data_selecionada agora é date
     if df_filtrado.empty:
         st.warning("Não há dados para exibir o gráfico de Gantt para o agente e data selecionados.")
         return go.Figure()
@@ -14,12 +14,10 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
     df_gantt = df_filtrado.copy()
     df_gantt["duracao_horas"] = df_gantt["minutos"] / 60
 
-    # Ordenar estados para garantir consistência na visualização
     estado_order = {estado: i for i, estado in enumerate(ESTADOS_INTERESSE)}
     df_gantt["estado_ordenado"] = df_gantt["estado"].map(estado_order)
     df_gantt = df_gantt.sort_values(by=["agente", "inicio", "estado_ordenado"])
 
-    # Criar o gráfico de Gantt
     fig = px.timeline(
         df_gantt,
         x_start="inicio",
@@ -78,7 +76,6 @@ def _resumo_estados_por_agente(df_filtrado: pd.DataFrame, limite_alerta: int):
     resumo_estados = df_filtrado.groupby(["agente", "estado"])["minutos"].sum().reset_index()
     resumo_estados["horas"] = resumo_estados["minutos"] / 60
 
-    # Calcular o total de minutos por agente para ordenação
     total_minutos_agente = resumo_estados.groupby("agente")["minutos"].sum().sort_values(ascending=False)
     resumo_estados["agente"] = pd.Categorical(resumo_estados["agente"], categories=total_minutos_agente.index, ordered=True)
     resumo_estados = resumo_estados.sort_values("agente")
@@ -101,7 +98,6 @@ def _resumo_estados_por_agente(df_filtrado: pd.DataFrame, limite_alerta: int):
         legend_title="Estado"
     )
 
-    # Adicionar linha de alerta para "Unified away"
     if "Unified away" in resumo_estados["estado"].unique():
         df_away = resumo_estados[(resumo_estados["estado"] == "Unified away") & (resumo_estados["minutos"] > limite_alerta)]
         if not df_away.empty:
@@ -155,14 +151,13 @@ def _metricas_principais(df_filtrado: pd.DataFrame, limite_alerta: int):
     with col5:
         st.metric("Tempo Offline", f"{offline_horas:.2f} h")
 
-def render(df_hist_filtrado_global: pd.DataFrame, df_escala: pd.DataFrame, limite_alerta: int, data_selecionada_global: datetime.date):
+def render(df_hist_filtrado_global: pd.DataFrame, df_escala: pd.DataFrame, limite_alerta: int, data_selecionada_global: date): # data_selecionada_global agora é date
     st.header("Dashboard de Produtividade do Agente")
 
     if df_hist_filtrado_global.empty:
         st.info("Nenhum dado disponível para o período e agente selecionados. Por favor, carregue um arquivo ou ajuste os filtros.")
         return
 
-    # Obter agentes disponíveis no df_hist_filtrado_global
     agentes_disponiveis = ["Todos"] + sorted(df_hist_filtrado_global["agente"].unique())
     agente_gantt = st.selectbox("Selecione o Agente para o Gantt", agentes_disponiveis, key="dashboard_agente_gantt")
 
@@ -171,7 +166,6 @@ def render(df_hist_filtrado_global: pd.DataFrame, df_escala: pd.DataFrame, limit
     else:
         df_filtrado_gantt = df_hist_filtrado_global.copy()
 
-    # A data para o Gantt é a data selecionada globalmente
     data_para_gantt = data_selecionada_global
 
     _metricas_principais(df_filtrado_gantt, limite_alerta)
