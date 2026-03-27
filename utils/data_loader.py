@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import streamlit as st
 import re
-from config import ESTADOS_INTERESSE, ESTADOS_EXCLUIR, MAP_WEEKDAY_TO_NAME # Importar MAP_WEEKDAY_TO_NAME
+from config import ESTADOS_INTERESSE, ESTADOS_EXCLUIR, MAP_WEEKDAY_TO_NAME # Usar MAP_WEEKDAY_TO_NAME
 from dedup import deduplicar # Importar a função de deduplicação
 
 def processar_arquivo(uploaded_file) -> pd.DataFrame:
@@ -68,22 +68,22 @@ def processar_arquivo(uploaded_file) -> pd.DataFrame:
 
         df_final = pd.DataFrame(df_processado)
 
-        # Adicionar coluna 'dia_semana' e 'dia_semana_num' usando MAP_WEEKDAY_TO_NAME
+        # Adicionar coluna 'dia_semana' e 'dia_semana_num'
         df_final["dia_semana"] = df_final["data"].apply(lambda x: MAP_WEEKDAY_TO_NAME[x.weekday()])
         df_final["dia_semana_num"] = df_final["data"].apply(lambda x: x.weekday())
 
-        # Aplicar deduplicação
+        # Chamar a função de deduplicação
         df_final = deduplicar(df_final)
 
         return df_final
 
     except ValueError as e:
         st.error(f"Erro ao processar o arquivo: {e}")
-        # st.exception(e) # Comentar para evitar mostrar o traceback completo ao usuário final
+        # st.exception(e) # Comentado para evitar mostrar o traceback completo ao usuário final, a menos que seja para depuração
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado: {e}")
-        # st.exception(e) # Comentar para evitar mostrar o traceback completo ao usuário final
+        # st.exception(e) # Comentado para evitar mostrar o traceback completo ao usuário final
         return pd.DataFrame()
 
 def get_agentes(df: pd.DataFrame) -> list:
