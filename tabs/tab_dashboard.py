@@ -3,10 +3,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
-from config import CORES_ESTADOS, DIAS_SEMANA_ORDEM, ESTADOS_INTERESSE, LIMITE_ALERTA_AWAY_MINUTOS # Importar LIMITE_ALERTA_AWAY_MINUTOS
+from datetime import datetime, timedelta, time
+from config import CORES_ESTADOS, DIAS_SEMANA_ORDEM, ESTADOS_INTERESSE, LIMITE_ALERTA_AWAY_MINUTOS
 
-def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_selecionada: datetime):
+def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_selecionada: datetime.date):
     if df_filtrado.empty:
         st.warning("Não há dados para exibir o gráfico de Gantt para o agente e data selecionados.")
         return go.Figure()
@@ -15,7 +15,6 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
     df_gantt["duracao_horas"] = df_gantt["minutos"] / 60
 
     # Ordenar estados para garantir consistência na visualização
-    # Priorizar "online", "away", "offline", "transfers only"
     estado_order = {estado: i for i, estado in enumerate(ESTADOS_INTERESSE)}
     df_gantt["estado_ordenado"] = df_gantt["estado"].map(estado_order)
     df_gantt = df_gantt.sort_values(by=["agente", "inicio", "estado_ordenado"])
@@ -27,7 +26,7 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
         x_end="fim",
         y="agente",
         color="estado",
-        color_discrete_map=CORES_ESTADOS, # Usando CORES_ESTADOS
+        color_discrete_map=CORES_ESTADOS,
         title=f"Gantt de Atividades para {agente_selecionado} em {data_selecionada.strftime('%d/%m/%Y')}",
         hover_name="estado",
         hover_data={
@@ -38,11 +37,11 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
         }
     )
 
-    fig.update_yaxes(autorange="reversed") # Inverte a ordem para o primeiro agente aparecer no topo
+    fig.update_yaxes(autorange="reversed")
 
     # Definir o range do eixo X para cobrir o dia inteiro
-    data_inicio_dia = datetime(data_selecionada.year, data_selecionada.month, data_selecionada.day, 0, 0, 0)
-    data_fim_dia = data_inicio_dia + timedelta(days=1)
+    data_inicio_dia = datetime.combine(data_selecionada, time.min)
+    data_fim_dia = datetime.combine(data_selecionada, time.max)
 
     fig.update_xaxes(
         range=[data_inicio_dia, data_fim_dia],
@@ -56,7 +55,7 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
     # Adicionar linhas verticais para cada hora
     for h in range(24):
         fig.add_vline(
-            x=datetime(data_selecionada.year, data_selecionada.month, data_selecionada.day, h),
+            x=datetime.combine(data_selecionada, time(h, 0, 0)),
             line_width=1,
             line_dash="dot",
             line_color="gray"
@@ -66,7 +65,7 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
         xaxis_title="Hora do Dia",
         yaxis_title="Agente",
         hovermode="x unified",
-        height=400 + len(df_gantt["agente"].unique()) * 30 # Ajusta a altura dinamicamente
+        height=400 + len(df_gantt["agente"].unique()) * 30
     )
 
     return fig
@@ -89,7 +88,7 @@ def _resumo_estados_por_agente(df_filtrado: pd.DataFrame, limite_alerta: int):
         x="horas",
         y="agente",
         color="estado",
-        color_discrete_map=CORES_ESTADOS, # Usando CORES_ESTADOS
+        color_discrete_map=CORES_ESTADOS,
         title="Tempo Total em Cada Estado por Agente (Horas)",
         orientation="h",
         hover_data={"minutos": True, "horas": ":.2f"},
@@ -143,7 +142,6 @@ def _metricas_principais(df_filtrado: pd.DataFrame, limite_alerta: int):
     transfers_only_minutos = df_filtrado[df_filtrado["estado"] == "Unified transfers only"]["minutos"].sum()
     transfers_only_horas = transfers_only_minutos / 60
 
-    # Corrigido para usar 5 colunas distintas
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
@@ -156,28 +154,27 @@ def _metricas_principais(df_filtrado: pd.DataFrame, limite_alerta: int):
         st.metric("Tempo Ausente (Away)", f"{away_horas:.2f} h", delta=f"Limite: {limite_alerta} min", delta_color="inverse" if away_minutos > limite_alerta else "normal")
     with col5:
         st.metric("Tempo Offline", f"{offline_horas:.2f} h")
-        # Se quiser "Transfers Only" em uma 6ª coluna, descomente e adicione col6 acima
-        # st.metric("Tempo Transfers Only", f"{transfers_only_horas:.2f} h")
 
-def render(df_hist: pd.DataFrame, df_escala: pd.DataFrame, limite_alerta: int): # Adicionado limite_alerta como parâmetro
+def render(df_hist_filtrado_global: pd.DataFrame, df_escala: pd.DataFrame, limite_alerta: int, data_selecionada_global: datetime.date):
     st.header("Dashboard de Produtividade do Agente")
 
-    # Obter agentes e data do df_hist (que já está filtrado por data na main)
-    agentes_disponiveis = ["Todos"] + sorted(df_hist["agente"].unique())
-    agente_gantt = st.selectbox("Selecione o Agente para o Gantt", agentes_disponiveis)
+    if df_hist_filtrado_global.empty:
+        st.info("Nenhum dado disponível para o período e agente selecionados. Por favor, carregue um arquivo ou ajuste os filtros.")
+        return
+
+    # Obter agentes disponíveis no df_hist_filtrado_global
+    agentes_disponiveis = ["Todos"] + sorted(df_hist_filtrado_global["agente"].unique())
+    agente_gantt = st.selectbox("Selecione o Agente para o Gantt", agentes_disponiveis, key="dashboard_agente_gantt")
 
     if agente_gantt != "Todos":
-        df_filtrado_gantt = df_hist[df_hist["agente"] == agente_gantt]
+        df_filtrado_gantt = df_hist_filtrado_global[df_hist_filtrado_global["agente"] == agente_gantt]
     else:
-        df_filtrado_gantt = df_hist.copy()
+        df_filtrado_gantt = df_hist_filtrado_global.copy()
 
-    # A data já vem filtrada para o dia selecionado na main, então pegamos a primeira data disponível
-    if not df_filtrado_gantt.empty:
-        data_gantt = df_filtrado_gantt["data"].iloc[0]
-    else:
-        data_gantt = datetime.now().date() # Fallback
+    # A data para o Gantt é a data selecionada globalmente
+    data_para_gantt = data_selecionada_global
 
     _metricas_principais(df_filtrado_gantt, limite_alerta)
 
-    st.plotly_chart(_gantt_chart(df_filtrado_gantt, agente_gantt, data_gantt), use_container_width=True)
+    st.plotly_chart(_gantt_chart(df_filtrado_gantt, agente_gantt, data_para_gantt), use_container_width=True)
     st.plotly_chart(_resumo_estados_por_agente(df_filtrado_gantt, limite_alerta), use_container_width=True)
