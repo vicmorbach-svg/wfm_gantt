@@ -54,7 +54,7 @@ def _gantt_chart(df_filtrado: pd.DataFrame, agente_selecionado: str, data_seleci
     # Adicionar linhas verticais para cada hora
     for h in range(24):
         fig.add_vline(
-            x=datetime.combine(data_selecionada, time(h)), # Usar datetime.combine com time(h)
+            x=datetime.combine(data_selecionada, time(h)), # Usar datetime.combine
             line_width=1,
             line_dash="dot",
             line_color="gray"
@@ -160,13 +160,14 @@ def render(df_hist_filtrado_global: pd.DataFrame, df_escala: pd.DataFrame, limit
         return
 
     agentes_disponiveis = ["Todos"] + sorted(df_hist_filtrado_global["agente"].unique())
-    agente_gantt = st.selectbox("Selecione o Agente para o Gantt", agentes_disponiveis, key="dashboard_agente_gantt")
+    agente_gantt = st.selectbox("Selecione o Agente para o Gantt", agentes_disponiveis, key="dashboard_agente_gantt") # Adicionado key
 
     if agente_gantt != "Todos":
         df_filtrado_gantt = df_hist_filtrado_global[df_hist_filtrado_global["agente"] == agente_gantt]
     else:
         df_filtrado_gantt = df_hist_filtrado_global.copy()
 
+    # A data já vem filtrada para o dia selecionado na main, então usamos data_selecionada_global
     data_para_gantt = data_selecionada_global
 
     _metricas_principais(df_filtrado_gantt, limite_alerta)
