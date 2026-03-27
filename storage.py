@@ -1,30 +1,30 @@
 import os
 import json
 import pandas as pd
-from config import HISTORICO_PATH, ESCALA_PATH, MAP_WEEKDAY_TO_NAME
-from datetime import datetime, time, date # Importar date
+from datetime import time, date # Importar time e date
+from config import HISTORICO_PATH, ESCALA_PATH
 
 # ── HISTÓRICO ──────────────────────────────────────────────────────────────────
 
 def carregar_historico() -> pd.DataFrame:
     if os.path.exists(HISTORICO_PATH):
         df = pd.read_parquet(HISTORICO_PATH)
-        # Garantir que as colunas de data/hora estejam no formato correto
-        if "inicio" in df.columns:
-            df["inicio"] = pd.to_datetime(df["inicio"])
-        if "fim" in df.columns:
-            df["fim"] = pd.to_datetime(df["fim"])
-        if "data" in df.columns:
-            # Converter para datetime e depois para date object para consistência
-            df["data"] = pd.to_datetime(df["data"]).dt.date 
+        # Garantir que 'data' seja datetime.date e 'inicio'/'fim' sejam datetime
+        if 'data' in df.columns:
+            df['data'] = pd.to_datetime(df['data']).dt.date
+        if 'inicio' in df.columns:
+            df['inicio'] = pd.to_datetime(df['inicio'])
+        if 'fim' in df.columns:
+            df['fim'] = pd.to_datetime(df['fim'])
         return df
     return pd.DataFrame()
 
 def salvar_historico(df: pd.DataFrame):
-    # Garantir que 'data' seja apenas a data antes de salvar
-    if "data" in df.columns:
-        df["data"] = df["data"].apply(lambda x: x.date() if isinstance(x, datetime) else x)
-    df.to_parquet(HISTORICO_PATH, index=False)
+    # Converter 'data' para string ou datetime para salvar no parquet
+    df_to_save = df.copy()
+    if 'data' in df_to_save.columns:
+        df_to_save['data'] = df_to_save['data'].astype(str) # Salvar como string para manter o formato date
+    df_to_save.to_parquet(HISTORICO_PATH, index=False)
 
 def limpar_historico():
     if os.path.exists(HISTORICO_PATH):
@@ -32,7 +32,6 @@ def limpar_historico():
 
 # ── ESCALA ─────────────────────────────────────────────────────────────────────
 
-# Adicionando 'data' à lista de colunas da escala e renomeando 'turno_inicio'/'turno_fim'
 ESCALA_COLS = [
     "agente", "data", "dia_semana", "dia_semana_num",
     "hora_inicio_escala", "hora_fim_escala", # Renomeado para consistência
@@ -42,27 +41,31 @@ ESCALA_COLS = [
 def carregar_escala() -> pd.DataFrame:
     if os.path.exists(ESCALA_PATH):
         df = pd.read_parquet(ESCALA_PATH)
-        # Garantir que 'data' seja datetime e horas sejam time objects
-        if "data" in df.columns:
-            df["data"] = pd.to_datetime(df["data"]).dt.normalize() # Garante que seja datetime sem hora
-        if "hora_inicio_escala" in df.columns:
-            # Converte para time object, lidando com strings ou outros formatos
-            df["hora_inicio_escala"] = df["hora_inicio_escala"].apply(lambda x: pd.to_datetime(str(x)).time() if isinstance(x, (str, time)) else x)
-        if "hora_fim_escala" in df.columns:
-            df["hora_fim_escala"] = df["hora_fim_escala"].apply(lambda x: pd.to_datetime(str(x)).time() if isinstance(x, (str, time)) else x)
+        # Garantir que 'data' seja datetime.date e as horas sejam datetime.time
+        if 'data' in df.columns:
+            df['data'] = pd.to_datetime(df['data']).dt.date
+        if 'hora_inicio_escala' in df.columns:
+            df['hora_inicio_escala'] = df['hora_inicio_escala'].apply(lambda x: time.fromisoformat(str(x)) if isinstance(x, str) else x)
+        if 'hora_fim_escala' in df.columns:
+            df['hora_fim_escala'] = df['hora_fim_escala'].apply(lambda x: time.fromisoformat(str(x)) if isinstance(x, str) else x)
         return df
     return pd.DataFrame(columns=ESCALA_COLS)
 
 def salvar_escala(df: pd.DataFrame):
-    # Garantir que 'data' seja apenas a data antes de salvar
-    if "data" in df.columns:
-        df["data"] = df["data"].dt.date # Salva apenas a data
-    df.to_parquet(ESCALA_PATH, index=False)
+    df_to_save = df.copy()
+    # Converter 'data' para string e 'time' para string para salvar no parquet
+    if 'data' in df_to_save.columns:
+        df_to_save['data'] = df_to_save['data'].astype(str)
+    if 'hora_inicio_escala' in df_to_save.columns:
+        df_to_save['hora_inicio_escala'] = df_to_save['hora_inicio_escala'].astype(str)
+    if 'hora_fim_escala' in df_to_save.columns:
+        df_to_save['hora_fim_escala'] = df_to_save['hora_fim_escala'].astype(str)
+    df_to_save.to_parquet(ESCALA_PATH, index=False)
 
 def escala_para_display(df_escala: pd.DataFrame) -> pd.DataFrame:
-    """Converte JSON de intervalos para texto legível e formata para exibição."""
+    """Converte JSON de intervalos para texto legível e formata a escala para exibição."""
     if df_escala.empty:
-        return pd.DataFrame(columns=["Agente", "Data", "Dia", "Turno Início", "Turno Fim", "Intervalos", "Observação"])
+        return pd.DataFrame(columns=["Agente", "Data", "Dia", "Início", "Fim", "Intervalos", "Observação"])
 
     rows = []
     for _, r in df_escala.iterrows():
@@ -76,10 +79,10 @@ def escala_para_display(df_escala: pd.DataFrame) -> pd.DataFrame:
             txt = "—"
         rows.append({
             "Agente":         r["agente"],
-            "Data":           r["data"].strftime("%d/%m/%Y") if pd.notna(r["data"]) and isinstance(r["data"], date) else "",
+            "Data":           r["data"].strftime('%d/%m/%Y') if isinstance(r["data"], date) else str(r["data"]),
             "Dia":            r["dia_semana"],
-            "Turno Início":   r["hora_inicio_escala"].strftime("%H:%M") if pd.notna(r["hora_inicio_escala"]) else "",
-            "Turno Fim":      r["hora_fim_escala"].strftime("%H:%M") if pd.notna(r["hora_fim_escala"]) else "",
+            "Início":         r["hora_inicio_escala"].strftime('%H:%M') if isinstance(r["hora_inicio_escala"], time) else str(r["hora_inicio_escala"]),
+            "Fim":            r["hora_fim_escala"].strftime('%H:%M') if isinstance(r["hora_fim_escala"], time) else str(r["hora_fim_escala"]),
             "Intervalos":     txt,
             "Observação":     r.get("observacao", ""),
         })
