@@ -83,9 +83,7 @@ def main():
     if df_escala.empty and not df_hist.empty:
         st.sidebar.info("Nenhuma escala encontrada. Gerando uma escala padrão inicial (08:00-17:00) para todos os agentes e datas no histórico.")
 
-        # Correção aqui: df_hist["data"] já é uma série de datetime.date
-        # Para obter datas únicas como datetime.date, basta usar .unique()
-        all_dates_in_hist = df_hist["data"].unique() # Agora retorna array de datetime.date
+        all_dates_in_hist = df_hist["data"].unique() # Já é array de datetime.date
         all_agents_in_hist = df_hist["agente"].unique()
 
         df_escala_expanded = []
@@ -94,8 +92,8 @@ def main():
                 df_escala_expanded.append({
                     "agente": agent,
                     "data": date_obj, # Já é datetime.date
-                    "hora_inicio_escala": time(8, 0),
-                    "hora_fim_escala": time(17, 0),
+                    "hora_inicio_escala": time(8, 0), # Usar time object
+                    "hora_fim_escala": time(17, 0),   # Usar time object
                     "dia_semana": MAP_WEEKDAY_TO_NAME[date_obj.weekday()],
                     "dia_semana_num": date_obj.weekday(),
                     "intervalos_json": "[]",
@@ -118,7 +116,8 @@ def main():
 
         tab_aderencia.render(df_hist_para_aderencia, df_escala)
     elif selected_tab == "Escala":
-        tab_escala.render(df_escala, agentes) # Passa a lista de agentes para o seletor na aba de escala
+        tab_escala.render(df_escala) # tab_escala não precisa de agentes, ela pega do df_escala
+        # O tab_escala agora gerencia sua própria recarga de df_escala para CRUD
 
 if __name__ == "__main__":
     main()
